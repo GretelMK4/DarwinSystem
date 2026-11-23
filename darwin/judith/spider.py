@@ -25,8 +25,10 @@ rules that the site owner sets:
                         longer matches the fingerprint taken at start-up.
 
 Every flag is a record for people: when, who, which rule, and the evidence.
-What happens next is the owner's choice. The shop can only alert
-(SPIDER=alert), or also let Judith seal the flagged address (SPIDER=seal).
+What happens next is the owner's choice. By default the shop only alerts
+(SPIDER=alert): the Spider watches and reports, and no visitor is treated
+differently because of it. SPIDER=seal also lets Judith seal a flagged
+address. SPIDER=off turns the Spider off.
 
 Limits, stated plainly
   - Rules are per source address. An attacker with many addresses gets

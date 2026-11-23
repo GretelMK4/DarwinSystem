@@ -20,9 +20,10 @@ ports 9500 and up, connected to the shop by signed intel. An attacker identity
 seen on a decoy site, or a fake key issued there, is then sealed at the shop.
 (Venus is a model with no device code, so it cannot take part in a live test.)
 
-The Spider: set SPIDER=alert or SPIDER=seal to run Judith's internal watcher
-(darwin/judith/spider.py). Its flags are written to spider_flags.jsonl in the
-output folder.
+The Spider (darwin/judith/spider.py) runs in alert mode by default: it flags
+but does not act. Set SPIDER=seal to let Judith seal what it flags, or
+SPIDER=off to run without it. Its flags are written to spider_flags.jsonl in
+the output folder.
 
 Usage: [HERCULES=8] [SPIDER=seal] python -m simulations.redteam.target [minutes] [output folder]
        defaults: 45 minutes, results/redteam_ground
@@ -148,7 +149,7 @@ def main(minutes=45.0, out=None, n_hercules=0):
     os.makedirs(out, exist_ok=True)
     env = dict(os.environ, MODE="lockdown", CATALOG=str(CATALOG), HONEYLINKS="on", SURGE="on",
                TRIPWIRES="on", ALARM_K="2", ENUM_N="60", PROB_BUDGET="1000000000", INTEL="off")
-    if env.get("SPIDER", "off") != "off":
+    if env.get("SPIDER", "alert") != "off":
         env["SPIDER_LOG"] = os.path.join(out, "spider_flags.jsonl")
     herc = None
     if n_hercules:

@@ -52,7 +52,7 @@ Be clear about this before you rely on anything here.
 | Judith's pitcher (`darwin/judith/pitcher.py`) | Working local server: bait, maze, fake API, one-way seal, scouts, catch and release, dashboard |
 | Judith's shop (`darwin/judith/shop.py`) | Working local server: five pitchers, lockdown, shadow site and shield, hidden links, crowd tripwires, signed intel intake, verified-crawler protection |
 | Hercules (`darwin/hercules/honeyfarm.py`) | Working local library: a farm of fake sites on localhost ports |
-| The Spider (`darwin/judith/spider.py`) | Working first version of the phase 2 watcher, off by default: per-address ledger with owner-set rules, fingerprints of Darwin's own files |
+| The Spider (`darwin/judith/spider.py`) | Working first version of the phase 2 watcher, on by default in alert mode (it flags for people and seals no one unless `SPIDER=seal`): per-address ledger with owner-set rules, fingerprints of Darwin's own files |
 | Signed intel (`darwin/intel.py`) | Working: HMAC-SHA256 envelopes with replay protection |
 | Crawler verification (`darwin/crawlers.py`) | Working, but tested only with fake DNS, never against live search-engine traffic |
 | **Venus** (`darwin/venus/`) | **Model only.** Two probability simulations of a phone. No app or on-device code exists |
@@ -152,12 +152,16 @@ the design sessions; its raw files are not in this repository yet.
   real adversary will find cracks these tests never imagined. The red-team run by AI
   agents that had not seen the defence is the only result here not graded by our own
   attacker model, and it was a single run against loud, fast attackers.
-- **A patient attacker wins unless the Spider is on, and may still win with it.** With
-  the Spider off (the default), a swarm that stays under every threshold takes the whole
-  catalog in 24 hours in the model. With it on, each address gets a shopper-sized slice
-  before it is flagged, so an attacker with enough addresses still gets everything. The one modelled
-  countermeasure that cuts this to about a fifth does it by wrongly sealing about 2% of
-  real shoppers, so it is off by default and not implemented in the shop.
+- **A patient attacker is only stopped if someone acts on the Spider's flags, and may
+  still win then.** The pitchers and tripwires alone lose the whole catalog to a swarm
+  that stays under every threshold (24 hours in the model). The Spider is on by default
+  but only alerts: it tells people, and the attacker keeps copying until a person
+  responds or the owner has chosen `SPIDER=seal`. Even in seal mode each address gets a
+  shopper-sized slice before it is flagged, so an attacker with enough addresses still
+  gets everything.
+- **Fast linking,** the one modelled countermeasure that cut a patient swarm's haul to
+  about a fifth, did it by wrongly sealing about 2% of real shoppers. It is off by
+  default and not implemented in the shop.
 - **This code is public.** Assume attackers know every trigger, default and file name.
   A real deployment must change the bait, the paths and the thresholds.
 - **The fakes fail against any trusted outside copy:** an older scrape, a
