@@ -47,16 +47,25 @@ a cautious bot leaves first.
 
 ### Ant-pheromone scouts
 
-`python -m simulations.attackers.ant_scouts <pitcher|ant_first> naive 60 7`
+`python -m simulations.attackers.ant_scouts <pitcher|ant_first|ant_every> <naive|cautious> 60 7`
 
-| | Plain pitcher | Scouts released with gold |
-|---|---|---|
-| Bots that entered the trap (of 60) | 31 | 36 |
-| Bots sealed | 25 | 27 |
-| Attacker seconds burned in the trap | 248 | 270 |
+Scouts are visitors Judith releases with fake "gold" so that they report success and
+draw the rest of the swarm in. `ant_first` releases the first 2 visitors; `ant_every`
+releases every 4th. A cautious swarm avoids a site its bots do not come back from.
 
-A small gain in single runs. The design sessions reported a larger effect against a
-cautious swarm (1 recruit without scouts, 16 with); that case was not re-run here.
+| Swarm | Scouts | Bots recruited by the swarm's own reports (of 60) | Bots that entered the trap | Attacker seconds burned |
+|---|---|---|---|---|
+| naive | none (plain pitcher) | 19 | 31 | 248 |
+| naive | first 2 | 13 | 36 | 270 |
+| naive | every 4th | 37 | 48 | 398 |
+| cautious | none (plain pitcher) | 2 | 23 | 117 |
+| cautious | first 2 | 13 | 31 | 243 |
+| cautious | every 4th | 16 | 31 | 194 |
+
+Releasing every 4th visitor roughly doubled recruitment against a naive swarm. Against
+a cautious swarm, which mostly stays away from a plain pitcher, scouts raised it from
+2 recruits to 13 to 16. Releasing only the first 2 scouts did little against a naive
+swarm. Single runs.
 
 ### A 150-bot swarm against the shop
 
@@ -93,6 +102,12 @@ nothing was sealed. It took little only because it chose to go slowly and the te
 lasted a minute and a half. Given time it takes everything (see the patient swarm
 below). The two 100% rows show the same thing from the other side: each defence was
 beaten outright by the first swarm that avoided its trigger.
+
+The eco_v2 against v3 row disagrees with the design write-up, which says a browser-like
+swarm "still took 45%". On the original code as well as the release code, three seeds
+all gave 100% with no lockdown: this swarm raises only two kinds of alarm and eco_v2
+needs three. Lowering the threshold to two (`ALARM_K=2`) gave 36%, so the 45% most
+likely came from a run with that setting. The write-up's own chart shows 100%.
 
 In the eco_v3 runs, shoppers who arrived during the lockdown had to solve the entry
 puzzle (12 times) and a few got a "busy, retry" reply (5 to 6 times). None saw a fake.
