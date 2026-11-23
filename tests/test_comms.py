@@ -39,20 +39,39 @@ def test_a_receiver_cannot_forge_what_it_can_verify():
     assert not any(hasattr(k, "sign") for k in r._keys.values())
 
 
-def test_lockdown_needs_corroboration_but_one_report_can_seal_one_visitor():
+def test_nothing_happens_on_one_site_alone():
     (h1, h2, *_), r, _ = setup()
     r.receive(h1.surge(10), 10)
     r.receive(h1.surge(11), 11)                                # the same site repeating itself adds nothing
-    assert not r.in_lockdown(12)
     r.receive(h1.intel(12, ["203.0.113.5|bot"]), 12)
-    assert r.is_sealed("203.0.113.5|bot", 13)
+    assert not r.in_lockdown(13)
+    assert not r.is_sealed("203.0.113.5|bot", 13) and "203.0.113.5|bot" in r.watch
     r.receive(h2.surge(20), 20)
-    assert r.in_lockdown(21)
+    r.receive(h2.intel(21, ["203.0.113.5|bot"]), 21)
+    assert r.in_lockdown(22) and r.is_sealed("203.0.113.5|bot", 22)
     assert [a["action"] for a in r.actions].count("lockdown") == 1
 
 
-def test_intel_seals_expire_and_higher_quorum_waits_for_a_second_site():
-    (h1, h2, *_), r, _ = setup(seal_quorum=2, seal_ttl=600)
+def test_the_receivers_own_sighting_counts_as_a_witness_but_not_alone():
+    (h1, *_), r, _ = setup()
+    r.local_evidence("203.0.113.7|quiet", 5)
+    assert not r.is_sealed("203.0.113.7|quiet", 6)             # her own mild suspicion is not enough
+    r.receive(h1.intel(10, ["203.0.113.7|quiet", "203.0.113.8|other"]), 10)
+    assert r.is_sealed("203.0.113.7|quiet", 11)                # one Hercules + her own eyes
+    assert not r.is_sealed("203.0.113.8|other", 11)
+    r.local_evidence(f"{SHARED}|Chrome", 12)
+    r.receive(h1.intel(13, [f"{SHARED}|Chrome"]), 13)
+    assert not r.is_sealed(f"{SHARED}|Chrome", 14)             # the shared-address rule still holds
+
+
+def test_a_quorum_of_one_can_be_chosen():
+    (h1, *_), r, _ = setup(seal_quorum=1)
+    r.receive(h1.intel(12, ["203.0.113.5|bot"]), 12)
+    assert r.is_sealed("203.0.113.5|bot", 13)
+
+
+def test_intel_seals_expire():
+    (h1, h2, *_), r, _ = setup(seal_ttl=600)
     r.receive(h1.intel(10, ["203.0.113.5|bot"]), 10)
     assert not r.is_sealed("203.0.113.5|bot", 11) and "203.0.113.5|bot" in r.watch
     r.receive(h2.intel(20, ["203.0.113.5|bot"]), 20)
@@ -68,7 +87,7 @@ def test_shared_address_is_watched_never_sealed_by_intel():
 
 
 def test_one_sender_can_only_name_so_many_visitors():
-    (h1, *_), r, _ = setup(sender_identity_cap=50)
+    (h1, *_), r, _ = setup(sender_identity_cap=50, seal_quorum=1)
     r.receive(h1.intel(10, [f"198.51.100.{i}|ua" for i in range(200)]), 10)
     assert sum(r.is_sealed(i, 11) for i in list(r.sealed)) == 50
     assert "over_cap" in kinds(r)
@@ -125,7 +144,7 @@ def test_a_lying_relay_gets_nowhere():
 
 
 def test_two_stories_under_one_number_distrusts_the_sender_and_withdraws_its_effects():
-    (h1, h2, *_), r, _ = setup()
+    (h1, h2, *_), r, _ = setup(seal_quorum=1)
     r.receive(h1.surge(10), 10)
     lie = h2._message("surge", {"targets": []}, 10, seq=1)
     other = h2._message("heartbeat", {"intel_seq": 0}, 10, seq=1)

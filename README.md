@@ -203,6 +203,7 @@ the design sessions; its raw files are not in this repository yet.
 | **1. The three plants** | **Released.** Judith and Hercules as working local prototypes, Venus as a model. |
 | **2. The Spider** | **Released, first version.** Built, on by default, and it caught three patient AI agents in a live test. |
 | **3. Protected communication** | **In progress.** A prototype channel and an attack simulation are in the repo ([docs/PHASE3.md](docs/PHASE3.md)); it is not yet wired into the servers. |
+| **4. Venus** | **Planned.** A real Venus on a phone, and a network of them. |
 
 **Phase 1: the three plants.** Design complete and in this release.
 
@@ -220,9 +221,15 @@ What phase 2 still owes before it can be called finished:
 replayed, read or silenced: per-plant keys, key rotation, encrypted transport, and a
 Spider that cannot be switched off by whoever it is watching.
 
+**Phase 4: Venus.** Today Venus is a model. Phase 4 is a first Venus on a real phone
+(decoy files, a hidden decoy app, decoy aging), and then a network of them: phones that
+pass signed Hercules warnings to each other and to Judith, so a warning cannot be
+blocked, and that report what their own decoys caught, so Judith has witnesses that do
+not depend on any Hercules. The open problems are fake phones flooding the network,
+keeping phone reports anonymous, and how phones reach each other at all.
+
 Also needed before anyone should depend on this: independent red teams, a few weeks of
-Judith and Hercules on an isolated server to see what real bots do, and a first Venus
-prototype on a real phone.
+Judith and Hercules on an isolated server to see what real bots do.
 
 ## Responsible use
 

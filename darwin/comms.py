@@ -16,9 +16,12 @@ The design
 
   Receivers act as watchers of what they are sent, in five ways:
 
-  1. Corroboration decides the size of the response. One Hercules reporting a
-     visitor can get that one visitor sealed. A lockdown (Judith) or arming
-     (Venus) needs several different Hercules to say "a swarm is sweeping".
+  1. Corroboration decides the size of the response. By default nothing
+     happens on one Hercules' word: sealing a visitor needs two witnesses
+     (two Hercules, or one Hercules plus something the receiver saw for
+     itself; see local_evidence), and a lockdown (Judith) or arming (Venus)
+     needs two different Hercules to say "a swarm is sweeping". A visitor
+     named by only one Hercules goes on a watch list.
      Hercules sites see different attackers, so reports that differ are
      normal: the test is whether a report is corroborated, never whether all
      reports match.
@@ -51,9 +54,9 @@ Two streams per sender
 
 What this does not do
   - It does not encrypt. Run it over TLS if the contents matter.
-  - It does not make Hercules trustworthy: a Hercules whose key is stolen can
-    still get up to `sender_identity_cap` visitors an hour sealed for
-    `seal_ttl` seconds each, unless `seal_quorum` is raised above 1.
+  - It does not survive two stolen Hercules keys at the default quorums: two
+    keys used together can cause a false lockdown and get up to
+    `sender_identity_cap` visitors sealed for `seal_ttl` seconds each.
   - Quorums only mean something if the Hercules sites are independent:
     different hosts, different keys, different operators if possible.
   - Fake-key ("token") reports are accepted from a single sender. A real
@@ -120,7 +123,7 @@ class Policy:
         self.silence_after = 100.0        # no direct heartbeat for this long = flag
         self.gap_grace = 45.0             # how long a missing number may stay missing before a flag
         self.corroboration_window = 600.0 # reports this close together support each other
-        self.seal_quorum = 1              # different Hercules needed to seal one visitor
+        self.seal_quorum = 2              # different witnesses needed to seal one visitor
         self.lockdown_quorum = 2          # different Hercules needed for lockdown / arming
         self.seal_ttl = 3600.0            # an intel seal lasts this long
         self.lockdown_ttl = 1800.0
@@ -274,6 +277,15 @@ class Receiver:
             named.append(now)
             self._ident[ident][sender] = now
             self._decide_identity(ident, now)
+
+    def local_evidence(self, identity, now):
+        """
+        The receiver saw this visitor do something suspicious ITSELF (not enough to seal on its own).
+        That counts as one witness, so one Hercules report plus the receiver's own eyes can seal.
+        It cannot be forged over the network: only the receiver's own code calls this.
+        """
+        self._ident[identity]["local:" + self.name] = now
+        self._decide_identity(identity, now)
 
     # ---------- deciding ----------
 

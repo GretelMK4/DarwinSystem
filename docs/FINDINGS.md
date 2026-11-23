@@ -328,13 +328,15 @@ none of it could be re-run for this release:
 [PHASE3.md](PHASE3.md). The prototype channel is not wired into the servers yet.
 
 - **One stolen key** did the most damage it could against the released v0.1 channel: a
-  false lockdown and 500 innocent shoppers sealed permanently. Against the prototype it
-  caused no lockdown and got 200 shoppers sealed for an hour.
+  false lockdown and 500 innocent shoppers sealed permanently. Against the prototype,
+  which needs two witnesses before it seals anyone, it did nothing.
 - Blocking, lying, replaying and telling two receivers different stories were all
   rejected or flagged in every run.
-- **Two stolen keys beat the default settings** (false lockdown, 400 shoppers sealed for
+- **Two stolen keys beat the default settings** (false lockdown, 200 shoppers sealed for
   an hour). Quorums high enough to stop that miss a real sweep that hits only two
-  Hercules sites and leave a lone attacker merely watched.
+  Hercules sites.
+- The two-witness default costs something: a lone attacker seen by one Hercules is only
+  watched until a second Hercules, or Judith herself, sees him too.
 - These are counts from a simulated network with real signatures, not estimates. They
   say the rules do what they were written to do. They say nothing about a real network.
 

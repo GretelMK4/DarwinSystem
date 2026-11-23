@@ -193,6 +193,25 @@ def honest_attack(world, n_sites=3):
             "false flags raised": len(world.flags() | world.flags("venus"))}
 
 
+def lone_attacker(world):
+    """Three lone attackers: one touches a single Hercules; one touches a second Hercules five minutes
+    later; one touches a single Hercules and then does something mildly suspicious on Judith's own site."""
+    one, two, local = "192.0.2.1|lone-a", "192.0.2.2|lone-b", "192.0.2.3|lone-c"
+    run(world, 900, {100.0: [lambda t: [world.report_visitor(0, x, t) for x in (one, two, local)]],
+                     400.0: [lambda t: world.report_visitor(3, two, t)],
+                     500.0: [lambda t: world.judith.local_evidence(local, t)]})
+    return {"one Hercules only: sealed": world.sealed(one, 800),
+            "one Hercules only: on the watch list": one in world.judith.watch,
+            "two Hercules, five minutes apart: sealed": world.sealed(two, 450),
+            "one Hercules + seen by Judith herself: sealed": world.sealed(local, 550),
+            "Judith's own sighting alone (no Hercules) seals": _local_alone(world)}
+
+
+def _local_alone(world):
+    world.judith.local_evidence("192.0.2.9|never-reported", 850)
+    return world.judith.is_sealed("192.0.2.9|never-reported", 851)
+
+
 def forged_without_a_key(world):
     """An outsider with no key sends messages claiming to be Hercules."""
     def attack(t):
@@ -358,14 +377,15 @@ def lossy_network(world):
 
 SCENARIOS = [
     ("1. No tampering: a real sweep of three sites, then a lone attacker", honest_attack,
-     [(V01, {}), (Phase3, {}), (Phase3, {"seal_quorum": 2}), (Phase3, {"seal_quorum": 3, "lockdown_quorum": 3})]),
+     [(V01, {}), (Phase3, {}), (Phase3, {"seal_quorum": 1}), (Phase3, {"seal_quorum": 3, "lockdown_quorum": 3})]),
     ("1b. No tampering: a smaller sweep of two sites, then a lone attacker", small_sweep,
-     [(V01, {}), (Phase3, {}), (Phase3, {"seal_quorum": 2}), (Phase3, {"seal_quorum": 3, "lockdown_quorum": 3})]),
+     [(V01, {}), (Phase3, {}), (Phase3, {"seal_quorum": 1}), (Phase3, {"seal_quorum": 3, "lockdown_quorum": 3})]),
+    ("1c. A lone attacker under the two-witness rule", lone_attacker, [(Phase3, {})]),
     ("2. Forged messages from someone with no key", forged_without_a_key, [(V01, {}), (Phase3, {})]),
     ("3. One stolen key", one_stolen_key,
-     [(V01, {}), (Phase3, {}), (Phase3, {"seal_quorum": 2})]),
+     [(V01, {}), (Phase3, {}), (Phase3, {"seal_quorum": 1})]),
     ("4. Two stolen keys", two_stolen_keys,
-     [(V01, {}), (Phase3, {}), (Phase3, {"seal_quorum": 2}), (Phase3, {"seal_quorum": 3, "lockdown_quorum": 3})]),
+     [(V01, {}), (Phase3, {}), (Phase3, {"seal_quorum": 1}), (Phase3, {"seal_quorum": 3, "lockdown_quorum": 3})]),
     ("5. Two of three reporting sites blocked from Judith", partly_silenced, [(V01, {}), (Phase3, {})]),
     ("6. Judith cut off completely", cut_off, [(V01, {}), (Phase3, {})]),
     ("7. A compromised Judith lies to Venus", lying_relay, [(Phase3, {})]),
