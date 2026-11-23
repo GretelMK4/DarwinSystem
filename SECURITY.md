@@ -10,7 +10,7 @@ Please report security problems privately. Do not open a public issue.
 
 - **Preferred:** use GitHub's private vulnerability reporting for this repository
   (the **Security** tab, then **Report a vulnerability**).
-- **Email:** spiritus5150@gmail.com
+- **Email:** ainzgown5150@gmail.com
 
 Please include what you found, how to reproduce it, and what an attacker could do with
 it. You should get a reply within 7 days. This is a small volunteer project, so fixes
