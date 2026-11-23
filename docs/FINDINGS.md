@@ -207,6 +207,29 @@ work, so this idea was dropped. It is unrelated to the phase 2 spider on the roa
 
 The only tests where the attacker was not written by the defenders.
 
+### Three patient Claude Fable 5.2 agents against the Spider (23 November 2026)
+
+Run on the release code; raw results are in
+[docs/redteam/2026-11-23-fable-5.2-patient-spider](redteam/2026-11-23-fable-5.2-patient-spider/README.md).
+
+The test Darwin was expected to lose. Each agent had its own address and 30 minutes, was
+told how the previous team had been fooled, and was told nothing about the Spider.
+
+- The agents kept 1,771 pages; **99 were genuine (1.6% of the catalog)**. They rated
+  their loot 90 to 95% likely genuine, and none believed it had been detected.
+- No pitcher, hidden link, tripwire or lockdown fired during the run. Every seal came
+  from the Spider, which flagged the three addresses after 5, 8 and 12 minutes, when
+  they held 38, 39 and 25 genuine pages.
+- All three browsed like a careful person: a listing page, then its ten products in
+  order. The Spider's enumeration rule caught that.
+- All three used canaries: pages saved while trusted and re-fetched to detect a switch
+  to fakes. The canaries never changed, because a sealed visitor who asks for a page it
+  already holds is given the real one.
+- Shoppers: 303 visits and 4,081 pages, all genuine, no flags, no delays.
+- The agents did not know the Spider's rules. The rules are public now: an attacker who
+  avoids number order and clockwork timing gets up to 150 products per address before
+  the breadth rule fires. One run.
+
 ### Three Claude Fable 5.2 agents, with Hercules connected (23 November 2026)
 
 Run on the release code; raw results are in
@@ -290,7 +313,14 @@ Done:
   Server header and a plain error page.
 - Request paths are escaped before being shown in generated pages.
 - Fast linking is off by default, with a warning.
-- 37 automated tests.
+- **The Spider**, a first working version of the phase 2 internal watcher: a ledger per
+  source address with owner-set rules, and fingerprints of Darwin's own files. Off by
+  default (`SPIDER=alert` or `SPIDER=seal`).
+- Hercules identifies visitors by address plus User-Agent. Sharing the User-Agent alone
+  would have let an attacker get every real shopper with a popular browser sealed.
+- The red-team target can run the whole ecosystem, and its simulated shoppers arrive
+  from their own addresses for visits of 4 to 25 products.
+- 45 automated tests.
 
 Not done, and why:
 
@@ -302,7 +332,10 @@ Not done, and why:
 
 ## 5. Known weaknesses
 
-1. A patient swarm that stays under the thresholds is not detected and takes everything.
+1. Without the Spider, a patient swarm that stays under the thresholds is not detected
+   and takes everything. With it, each address is limited to a shopper-sized slice (150
+   products by default), so an attacker needs many addresses. That case is untested, and
+   people who share an address share the limit.
 2. An attacker with a trusted outside copy of the data can tell real from fake.
 3. Attackers with valid logins who ignore bait are mostly invisible to deception.
 4. Each alarm can be avoided by an attacker who knows its trigger. This code is public,

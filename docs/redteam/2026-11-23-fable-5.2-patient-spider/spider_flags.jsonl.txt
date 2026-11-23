@@ -1,0 +1,6 @@
+{"t": 1795429661.2956066, "subject": "127.0.0.12", "rule": "enumeration", "evidence": "69% of the last 40 views were the neighbouring product number"}
+{"t": 1795429851.3309088, "subject": "127.0.0.13", "rule": "enumeration", "evidence": "92% of the last 40 views were the neighbouring product number"}
+{"t": 1795429906.344213, "subject": "127.0.0.12", "rule": "breadth", "evidence": "152 different products viewed (approved: up to 150)"}
+{"t": 1795430121.3973172, "subject": "127.0.0.11", "rule": "enumeration", "evidence": "90% of the last 40 views were the neighbouring product number"}
+{"t": 1795430166.410852, "subject": "127.0.0.13", "rule": "breadth", "evidence": "151 different products viewed (approved: up to 150)"}
+{"t": 1795431081.7510736, "subject": "127.0.0.11", "rule": "breadth", "evidence": "152 different products viewed (approved: up to 150)"}

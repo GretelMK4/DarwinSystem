@@ -52,6 +52,7 @@ Be clear about this before you rely on anything here.
 | Judith's pitcher (`darwin/judith/pitcher.py`) | Working local server: bait, maze, fake API, one-way seal, scouts, catch and release, dashboard |
 | Judith's shop (`darwin/judith/shop.py`) | Working local server: five pitchers, lockdown, shadow site and shield, hidden links, crowd tripwires, signed intel intake, verified-crawler protection |
 | Hercules (`darwin/hercules/honeyfarm.py`) | Working local library: a farm of fake sites on localhost ports |
+| The Spider (`darwin/judith/spider.py`) | Working first version of the phase 2 watcher, off by default: per-address ledger with owner-set rules, fingerprints of Darwin's own files |
 | Signed intel (`darwin/intel.py`) | Working: HMAC-SHA256 envelopes with replay protection |
 | Crawler verification (`darwin/crawlers.py`) | Working, but tested only with fake DNS, never against live search-engine traffic |
 | **Venus** (`darwin/venus/`) | **Model only.** Two probability simulations of a phone. No app or on-device code exists |
@@ -95,7 +96,7 @@ a time.
 
 ```
 darwin/
-  judith/      pitcher.py, shop.py, dashboard.html
+  judith/      pitcher.py, shop.py, spider.py, dashboard.html
   hercules/    honeyfarm.py
   venus/       flytrap_model.py, decoy_apps_model.py   (models only)
   intel.py     signed messages between the plants
@@ -122,6 +123,7 @@ Full detail, with the command behind every number, is in
 |---|---|---|
 | 150 bots copying a 3,000-item catalog | 100% stolen (standard rate limit) | 27% stolen; 73% of the swarm's haul was fake |
 | 300 adaptive bots, full ecosystem, 6,000 items | 100% stolen | 0.2% stolen; 99.8% of the haul was fake |
+| Live red team: three *patient* Claude Fable 5.2 agents, own addresses, 30 minutes, Spider on | not run | 99 products stolen (1.6%); none of the agents believed it had been detected |
 | Live red team: three Claude Fable 5.2 agents, 6,000 items, Hercules connected | not run | 2 products stolen; the agents were 90 to 98% sure their copies were genuine |
 | Live red team: three Claude Opus 5.5 agents, 6,000 items | not run | 1.8% stolen; one agent believed it had everything |
 | Bots that chose the trap as their first target (fake internet of 61 sites) | 1 of 40 with no bait | 33 of 40 with bait |
@@ -150,8 +152,10 @@ the design sessions; its raw files are not in this repository yet.
   real adversary will find cracks these tests never imagined. The red-team run by AI
   agents that had not seen the defence is the only result here not graded by our own
   attacker model, and it was a single run against loud, fast attackers.
-- **A patient attacker wins against the code as released.** In the model, a swarm that
-  stays under every threshold takes the whole catalog in 24 hours. The one modelled
+- **A patient attacker wins unless the Spider is on, and may still win with it.** With
+  the Spider off (the default), a swarm that stays under every threshold takes the whole
+  catalog in 24 hours in the model. With it on, each address gets a shopper-sized slice
+  before it is flagged, so an attacker with enough addresses still gets everything. The one modelled
   countermeasure that cuts this to about a fifth does it by wrongly sealing about 2% of
   real shoppers, so it is off by default and not implemented in the shop.
 - **This code is public.** Assume attackers know every trigger, default and file name.
@@ -185,7 +189,10 @@ the design sessions; its raw files are not in this repository yet.
   local prototypes, Venus as a model.
 - **Phase 2: the spider.** An internal watcher that lives inside the site, like an
   immune cell. It inspects the site and Darwin itself and alerts people when something
-  is not approved. Aimed at slow attackers. It does not need to be an AI agent.
+  is not approved. Aimed at slow attackers. It is not an AI agent. A first version is
+  in this release (`darwin/judith/spider.py`) and caught three patient AI agents in a
+  live test; it still needs testing against attackers with many addresses, real shopper
+  traffic, and an intruder who tampers with Darwin from the inside.
 - **Phase 3: protected communication.** Hardening the messages between the plants so
   they cannot be tampered with or read: per-plant keys, rotation, encrypted transport.
 
