@@ -58,6 +58,14 @@ Optional alarm signals
                     fake keys it issued, surge reports) on the admin port.
                     Requires DARWIN_INTEL_KEY; see darwin/intel.py.
 
+The Spider (SPIDER=off|alert|seal, default off)
+    Judith's internal watcher for patient attackers; see spider.py. It keeps a
+    ledger per source address and flags behaviour the owner has not approved
+    (too many different products, number-by-number enumeration, clockwork
+    timing, many User-Agents from one address) and any change to Darwin's own
+    files. alert = write flags for people (results/spider_flags.jsonl and the
+    stats port). seal = also seal every visitor from a flagged address.
+
 Verified search crawlers (VERIFY_CRAWLERS=on, the default) always get the real
 site and are never sealed, counted or challenged. See darwin/crawlers.py.
 
@@ -87,6 +95,8 @@ from urllib.parse import urlparse, parse_qs
 from darwin import crawlers, intel
 from darwin.httpbase import QuietHandler
 from darwin.judith import pitcher as ts
+from darwin.judith import spider as spider_mod
+from darwin.results import results_path
 
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8088"))
@@ -145,6 +155,10 @@ INTEL_MAX = 200_000                                   # most identities / keys r
 INTEL_VERIFIER = None                                 # set in main() when INTEL=on
 INTEL_REJECTED = collections.Counter()
 CRAWLERS = crawlers.CrawlerVerifier()
+SPIDER_MODE = os.environ.get("SPIDER", "off")         # off | alert | seal
+SPIDER = None                                         # the Spider object, created in main()
+SPIDER_SEALED = set()                                 # addresses the Spider flagged (seal mode)
+SPIDER_FLAGS = []                                     # what it has raised, for the stats port
 RELEASES = MODE in ("single", "multi") or LOCKDOWN_MODE
 
 LOCK = threading.Lock()
@@ -371,6 +385,8 @@ class Handler(QuietHandler):
             self.serve_crawler(path, query)
             return
         is_human = ua.startswith("Mozilla")               # measurement only
+        if SPIDER is not None and path.startswith("/shop/item/") and item_id(path):
+            SPIDER.observe(self.client_address[0], ua, item_id(path), t0)
         pit = pitcher_of(path)
         is_catalog = path.startswith("/shop/")
         honey = honey_id(path)
@@ -393,8 +409,11 @@ class Handler(QuietHandler):
                 if len(NEW_CAT) >= SURGE_N and t0 - SURGE_STATE["last"] > 1:
                     SURGE_STATE["last"] = t0
                     note_trigger("surge", t0, client)
+            if self.client_address[0] in SPIDER_SEALED and not c["sealed_at"]:
+                note_trigger("spider", t0, client)                    # flagged by the internal watcher
+                seal(c, client, "spider", t0)
             if INTEL_ON and not c["sealed_at"]:
-                if ua in INTEL_IDS:                                   # seen stuck on Hercules
+                if client in INTEL_IDS:                               # seen stuck on Hercules (address + User-Agent)
                     note_trigger("intel_hercules", t0, client)
                     seal(c, client, "intel_hercules", t0)
                 elif ts.key_from(self.headers) in INTEL_TOKENS:       # using a Hercules fake key
@@ -596,6 +615,7 @@ def stats():
             "lockdown_epoch": la,
             "intel_identities": len(INTEL_IDS), "intel_tokens": len(INTEL_TOKENS),
             "intel_rejected": dict(INTEL_REJECTED),
+            "spider": {"mode": SPIDER_MODE, "flags": list(SPIDER_FLAGS)},
             "real_items_stolen": len(STOLEN),
             "fake_items_served": len(FAKE_ITEMS),
             "bot_identities_seen": len(bots),
@@ -645,7 +665,7 @@ class Admin(QuietHandler):
             d = INTEL_VERIFIER.verify(json.loads(self.rfile.read(n)))
         except ValueError as e:                                        # bad JSON or intel.IntelError
             return 403, str(e) if isinstance(e, intel.IntelError) else "malformed envelope"
-        ids = [x[:MAX_UA] for x in d.get("identities", []) if isinstance(x, str)]
+        ids = [x[:MAX_UA + 64] for x in d.get("identities", []) if isinstance(x, str)]
         toks = [x for x in d.get("tokens", []) if isinstance(x, str) and len(x) <= 128]
         with LOCK:
             if len(INTEL_IDS) + len(ids) <= INTEL_MAX:
@@ -665,6 +685,32 @@ class Admin(QuietHandler):
         self.wfile.write(body)
 
 
+def spider_flag(flag):
+    """Called by the Spider for each new flag: record it for people and, in seal mode, let Judith act."""
+    subject = flag["subject"]
+    with LOCK:
+        held = set()
+        for c in CLIENTS.values():
+            if c["ip"] == subject:
+                held |= c["real_items"]
+        SPIDER_FLAGS.append({"at_s": round(flag["t"] - STATE["start"], 1), "subject": subject, "rule": flag["rule"],
+                             "evidence": flag["evidence"], "real_products_held_when_flagged": len(held)})
+        event("SPIDER_FLAG", subject, f"{flag['rule']}: {flag['evidence']}")
+        if SPIDER_MODE == "seal" and flag["rule"] != "component_changed":
+            SPIDER_SEALED.add(subject)
+
+
+def start_spider(flag_log=None):
+    global SPIDER
+    SPIDER = spider_mod.Spider(flag_log=flag_log, on_flag=spider_flag)
+    here = os.path.dirname(os.path.abspath(__file__))
+    package = os.path.dirname(here)
+    SPIDER.watch_files(sorted(os.path.join(root, name) for root, _, names in os.walk(package)
+                              for name in names if name.endswith((".py", ".html"))))
+    SPIDER.start()
+    return SPIDER
+
+
 class ShopServer(ThreadingHTTPServer):
     request_queue_size = 1024                     # a massive swarm needs a deep accept queue
     daemon_threads = True
@@ -677,6 +723,8 @@ def main():
             INTEL_VERIFIER = intel.Verifier(intel.key_from_env())
         except intel.IntelError as e:
             sys.exit(f"INTEL=on but {e}")
+    if SPIDER_MODE in ("alert", "seal"):
+        start_spider(os.environ.get("SPIDER_LOG", results_path("spider_flags.jsonl")))
     if HOST not in ("127.0.0.1", "localhost", "::1"):
         print(f"WARNING: binding to {HOST}. This is a research prototype; see the limits in README.md "
               "before exposing it to a network.", file=sys.stderr)

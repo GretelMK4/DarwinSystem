@@ -181,10 +181,11 @@ class Hercules:
                 with herc.lock:
                     herc.requests += 1
                     herc.req_seconds += dt
-                    v = herc.visitors.get(ua)
+                    who = f"{self.client_address[0]}|{ua}"      # address + User-Agent, as Judith identifies visitors
+                    v = herc.visitors.get(who)
                     if v is None:
-                        v = herc.visitors[ua] = {"first": t0, "requests": 0, "sites": set()}
-                        herc.pending_ids.append(ua)
+                        v = herc.visitors[who] = {"first": t0, "requests": 0, "sites": set()}
+                        herc.pending_ids.append(who)
                         herc.new_times = [x for x in herc.new_times if t0 - x <= herc.surge_window] + [t0]
                         if len(herc.new_times) >= herc.surge_n:      # a swarm is sweeping the internet
                             herc.surge_flag = True
