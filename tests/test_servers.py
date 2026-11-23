@@ -186,3 +186,66 @@ def test_pitcher_ignores_verified_crawlers(pitcher_url, monkeypatch):
     home = get(f"{pitcher_url}/", GOOGLE_UA)
     assert home[0] == 200 and "<!--" not in home[1]
     assert f"127.0.0.1|{GOOGLE_UA}" not in pitcher.CLIENTS
+
+
+# ---------------- server fingerprint ----------------
+
+def test_servers_do_not_announce_python(shop_url, pitcher_url):
+    for url in (shop_url, pitcher_url):
+        with urllib.request.urlopen(urllib.request.Request(url + "/", headers={"User-Agent": "Mozilla/5.0 (fp)"})) as r:
+            assert r.headers["Server"] == "nginx/1.24.0"                    # no trailing space, no "Python/3.x"
+            assert r.version == 11                                           # HTTP/1.1
+        req = urllib.request.Request(url + "/", method="DELETE", headers={"User-Agent": "Mozilla/5.0 (fp)"})
+        try:
+            urllib.request.urlopen(req)
+            raise AssertionError("expected an error status")
+        except urllib.error.HTTPError as e:
+            assert "Python" not in e.read().decode() and "Python" not in str(e.headers)
+
+
+# ---------------- entry challenge (keep last: it puts the shop into lockdown) ----------------
+
+def test_proof_of_work_functions():
+    answer = shop.solve_challenge(f"{shop.CHALLENGE_PREFIX}tok123:12")
+    token, counter = answer.split(":")
+    assert token == "tok123" and shop.challenge_solved(token, counter, 12)
+    assert not shop.challenge_solved(token, str(int(counter) + 1), 20)
+    assert not shop.challenge_answered({shop.CHALLENGE_HEADER: "tok123:not-a-number"}, "tok123")
+    assert not shop.challenge_answered({shop.CHALLENGE_HEADER: answer}, "another-token")
+
+
+def test_browser_page_solves_the_same_puzzle(tmp_path, monkeypatch):
+    """Run the challenge page's own JavaScript under Node and check its answer with the server's verifier."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    monkeypatch.setattr(shop, "CHALLENGE_BITS", 10)
+    _, _, page = shop.challenge_response("browsertoken", wants_html=True)
+    script = page.split("<script>")[1].split("</script>")[0]
+    runner = tmp_path / "run.js"
+    runner.write_text("globalThis.document = { set cookie(v) { console.log(v); } };\n"
+                      "globalThis.location = { reload() {} };\n" + script)
+    out = subprocess.run([node, str(runner)], capture_output=True, text=True, timeout=60).stdout.strip()
+    cookie = out.split(";")[0]
+    assert cookie.startswith(shop.CHALLENGE_COOKIE + "=")
+    assert shop.challenge_answered({"Cookie": cookie}, "browsertoken")
+
+
+def test_newcomer_must_solve_the_puzzle_during_lockdown(shop_url, monkeypatch):
+    import time
+    monkeypatch.setattr(shop, "TRIPWIRES", True)
+    monkeypatch.setattr(shop, "CHALLENGE_BITS", 10)
+    monkeypatch.setitem(shop.STATE, "lockdown_at", time.time())
+    ua = "Mozilla/5.0 (arrived-mid-attack)"
+    st, body = get(f"{shop_url}/shop/item/11", ua)
+    assert st == 403 and body.startswith(shop.CHALLENGE_PREFIX)
+    token = body[len(shop.CHALLENGE_PREFIX):].split(":")[0]
+    assert get(f"{shop_url}/shop/item/11", ua, {shop.CHALLENGE_HEADER: f"{token}:0"})[0] == 403   # wrong answer
+    st, page = get(f"{shop_url}/shop/item/11", ua, {"Accept": "text/html"})
+    assert st == 403 and token in page and "<script>" in page                # browsers get the solver page
+    answer = shop.solve_challenge(body)
+    assert get(f"{shop_url}/shop/item/11", ua, {shop.CHALLENGE_HEADER: answer}) == (200, shop.item_page(11))
+    time.sleep(1.1)                                                           # probation pace rule: 2 pages within 1 s seals
+    assert get(f"{shop_url}/shop/item/12", ua) == (200, shop.item_page(12))  # solved once, not asked again

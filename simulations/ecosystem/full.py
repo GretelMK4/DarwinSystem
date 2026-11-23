@@ -248,10 +248,10 @@ class MaxBot(threading.Thread):
         self.fetched.add((base, path))
         time.sleep(PACE)
         if st == 403 and text.startswith(fs.CHALLENGE_PREFIX) and "challenge_solver" in TACTICS and not challenge:
-            time.sleep(1.0)                                   # wait out the entry challenge (~1 s per identity)
+            time.sleep(1.0)                                   # modelled solving time (~1 s per identity)
             with self.b.lock:
                 self.b.c["puzzles_solved"] += 1
-            return self.req(base, path, key, challenge=text[len(fs.CHALLENGE_PREFIX):])
+            return self.req(base, path, key, challenge=fs.solve_challenge(text))
         return st, text, srv, dt
 
     def rotate(self, why):
@@ -534,7 +534,7 @@ class Human(threading.Thread):
             if st == 403 and text.startswith(fs.CHALLENGE_PREFIX):
                 self.puzzles += 1
                 time.sleep(1.0)
-                st, text = self.get(ua, n, text[len(fs.CHALLENGE_PREFIX):])
+                st, text = self.get(ua, n, fs.solve_challenge(text))
             if st == 503:
                 self.busy += 1
                 time.sleep(2.0)
@@ -644,7 +644,9 @@ def main():
     env = dict(os.environ, MODE=cfg["judith"], **{intel.ENV_KEY: intel_key}, CATALOG=str(CATALOG), INTEL="on" if cfg["share"] else "off",
                HONEYLINKS="on" if "honeylinks" in fixes else "off", SURGE="on" if "surge" in fixes else "off")
     if v3:
-        env.update(TRIPWIRES="on", ALARM_K=os.environ.get("ALARM_K", "2"), ENUM_N=os.environ.get("ENUM_N", "60"),
+        # The puzzle is real but easy here (8 bits) and the server enforces a 0.9 s wait instead, so that
+        # hundreds of bot threads solving at once do not distort the timing of the simulation itself.
+        env.update(TRIPWIRES="on", CHALLENGE_BITS="8", CHALLENGE_MIN_WAIT="0.9", ALARM_K=os.environ.get("ALARM_K", "2"), ENUM_N=os.environ.get("ENUM_N", "60"),
                    PROB_BUDGET=os.environ.get("PROB_BUDGET", "1000000000"),   # budget off: it only hurt shoppers
                    ENTRY_CHALLENGE="on" if "challenge" in fixes else "off",
                    PACE_RULE="on" if "probation" in fixes else "off")

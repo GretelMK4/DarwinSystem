@@ -46,10 +46,14 @@ Optional alarm signals
                         probation: two products within 1 s seals them
                         (PACE_RULE), and they share a budget of CAP_RATE
                         never-served products per second ("busy, retry")
-        entry challenge ENTRY_CHALLENGE=on: each visitor on probation must wait
-                        about 1 s and echo a token before the first page.
-                        This is a delay, not a proof of work, and a patient
-                        bot passes it by retrying.
+        entry challenge ENTRY_CHALLENGE=on: each visitor on probation must solve
+                        a proof-of-work puzzle before the first page: find a
+                        number whose SHA-256 hash with the visitor's token
+                        starts with CHALLENGE_BITS zero bits. Browsers get a
+                        small page that solves it and reloads. It costs each
+                        new identity some computing time; it does not stop a
+                        bot that is willing to pay, and it locks out people
+                        whose browser has JavaScript turned off.
     INTEL=on        accept signed intel from Hercules (identities seen there,
                     fake keys it issued, surge reports) on the admin port.
                     Requires DARWIN_INTEL_KEY; see darwin/intel.py.
@@ -70,16 +74,18 @@ state without a size limit, thresholds tuned to simulated traffic.
 Run:  python -m darwin.judith.shop
 """
 import collections
+import hashlib
 import json
 import os
 import random
 import sys
 import threading
 import time
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from darwin import crawlers, intel
+from darwin.httpbase import QuietHandler
 from darwin.judith import pitcher as ts
 
 HOST = os.environ.get("HOST", "127.0.0.1")
@@ -111,8 +117,10 @@ ENUM_WINDOW = float(os.environ.get("ENUM_WINDOW", "5"))    # ... within this man
 EST_AGE = float(os.environ.get("EST_AGE", "2.0"))          # sessions older than this, browsing slowly, are trusted
 PROB_BUDGET = int(os.environ.get("PROB_BUDGET", "12"))     # real products a new visitor gets during lockdown
 CAP_RATE = float(os.environ.get("CAP_RATE", "2.0"))        # never-seen products/sec for ALL new visitors combined
-ENTRY_CHALLENGE = os.environ.get("ENTRY_CHALLENGE", "on") == "on"   # ~1 s wait-and-echo for visitors on probation
-CHALLENGE_HEADER, CHALLENGE_PREFIX = "X-Challenge", "challenge:"
+ENTRY_CHALLENGE = os.environ.get("ENTRY_CHALLENGE", "on") == "on"   # proof-of-work puzzle for visitors on probation
+CHALLENGE_BITS = int(os.environ.get("CHALLENGE_BITS", "18"))        # leading zero bits required (work doubles per bit)
+CHALLENGE_MIN_WAIT = float(os.environ.get("CHALLENGE_MIN_WAIT", "0"))  # optional: also refuse answers sooner than this
+CHALLENGE_HEADER, CHALLENGE_PREFIX, CHALLENGE_COOKIE = "X-Challenge", "challenge:", "darwin_challenge"
 VERIFY_CRAWLERS = os.environ.get("VERIFY_CRAWLERS", "on") == "on"
 MAX_UA = 300
 PACE_RULE = os.environ.get("PACE_RULE", "on") == "on"      # new visitor: 2 products within 1 s = sealed
@@ -253,6 +261,65 @@ def static_page(path, query, honeylinks=None, bait=True):
 NOT_FOUND = "<html><body>Not Found</body></html>"
 
 
+# ---------- entry challenge (proof of work) ----------
+
+def challenge_solved(token: str, counter: str, bits: int = None) -> bool:
+    """True if SHA-256("<token>:<counter>") starts with `bits` zero bits."""
+    bits = CHALLENGE_BITS if bits is None else bits
+    digest = hashlib.sha256(f"{token}:{counter}".encode()).digest()
+    return int.from_bytes(digest, "big") >> (256 - bits) == 0
+
+
+def challenge_answered(headers, token: str) -> bool:
+    """Did this request carry a valid answer ("<token>:<counter>") in the header or the cookie?"""
+    answers = [headers.get(CHALLENGE_HEADER, "")]
+    for part in headers.get("Cookie", "").split(";"):
+        name, _, value = part.strip().partition("=")
+        if name == CHALLENGE_COOKIE:
+            answers.append(value)
+    for answer in answers:
+        tok, _, counter = answer.partition(":")
+        if tok == token and counter.isdigit() and len(counter) <= 20 and challenge_solved(token, counter):
+            return True
+    return False
+
+
+def solve_challenge(text: str) -> str:
+    """Client side: solve a "challenge:<token>:<bits>" reply; returns the value for the X-Challenge header."""
+    token, _, bits = text[len(CHALLENGE_PREFIX):].strip().partition(":")
+    counter = 0
+    while not challenge_solved(token, str(counter), int(bits)):
+        counter += 1
+    return f"{token}:{counter}"
+
+
+CHALLENGE_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Just a moment</title></head>
+<body><p>Checking your browser. This takes a few seconds.</p>
+<noscript><p>Please turn on JavaScript and reload this page.</p></noscript>
+<script>
+(async () => {
+  const token = "%(token)s", bits = %(bits)d, enc = new TextEncoder();
+  for (let n = 0; ; n++) {
+    const d = new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(token + ":" + n)));
+    let zeros = 0;
+    for (const b of d) { if (b === 0) { zeros += 8; continue; } zeros += Math.clz32(b) - 24; break; }
+    if (zeros >= bits) {
+      document.cookie = "%(cookie)s=" + token + ":" + n + "; path=/; SameSite=Lax";
+      location.reload();
+      break;
+    }
+  }
+})();
+</script></body></html>"""
+
+
+def challenge_response(token: str, wants_html: bool):
+    """Browsers get a page that solves the puzzle and reloads; other clients get one line of text."""
+    if wants_html:
+        return 403, "text/html", CHALLENGE_PAGE % {"token": token, "bits": CHALLENGE_BITS, "cookie": CHALLENGE_COOKIE}
+    return 403, "text/plain", f"{CHALLENGE_PREFIX}{token}:{CHALLENGE_BITS}"
+
+
 # ---------- defence state ----------
 
 def new_client(ip, ua, t):
@@ -293,13 +360,7 @@ def lock_now(reason, t, client):
         event("LOCKDOWN", client, f"instant: {reason}")
 
 
-class Handler(BaseHTTPRequestHandler):
-    server_version = "nginx/1.24.0"
-    sys_version = ""
-
-    def log_message(self, *a):
-        pass
-
+class Handler(QuietHandler):
     def do_GET(self):
         t0 = time.time()
         u = urlparse(self.path)
@@ -399,8 +460,8 @@ class Handler(BaseHTTPRequestHandler):
                     c["probation"] = not (age >= EST_AGE and c["n_items"] / max(age, 0.5) <= 0.5)
                 if c["probation"] and not c["sealed_at"]:
                     if ENTRY_CHALLENGE and not c.get("challenge_ok"):
-                        answer = self.headers.get(CHALLENGE_HEADER)
-                        if answer and answer == c.get("challenge_token") and t0 - c["challenge_t"] >= 0.9:
+                        if c.get("challenge_token") and t0 - c["challenge_t"] >= CHALLENGE_MIN_WAIT \
+                                and challenge_answered(self.headers, c["challenge_token"]):
                             c["challenge_ok"] = True
                         else:
                             if not c.get("challenge_token"):
@@ -426,7 +487,8 @@ class Handler(BaseHTTPRequestHandler):
         # ---------- build the response ----------
         kind, drip = "real", 0.0
         if challenge:
-            st, ct, body, kind = 403, "text/plain", CHALLENGE_PREFIX + c["challenge_token"], "challenge"
+            kind = "challenge"
+            st, ct, body = challenge_response(c["challenge_token"], "text/html" in self.headers.get("Accept", ""))
         elif busy:
             st, ct, body, kind = 503, "text/plain", "busy, please retry", "busy"
         elif blocked:
@@ -553,7 +615,7 @@ def stats():
         }
 
 
-class Admin(BaseHTTPRequestHandler):
+class Admin(QuietHandler):
     def do_POST(self):
         """POST /intel: a signed intel envelope from Hercules. Unsigned or forged messages change nothing."""
         status, reason = self.take_intel()
@@ -561,8 +623,10 @@ class Admin(BaseHTTPRequestHandler):
             with LOCK:
                 INTEL_REJECTED[reason] += 1
         body = (reason or "ok").encode()
+        self.close_connection = True                                   # the request body may be unread
         self.send_response(status)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 
@@ -591,9 +655,6 @@ class Admin(BaseHTTPRequestHandler):
             if d.get("surge") is True:                                 # Hercules: a swarm is out there
                 note_trigger("hercules_surge", time.time(), "hercules|hercules")
         return 200, None
-
-    def log_message(self, *a):
-        pass
 
     def do_GET(self):
         body = json.dumps(stats()).encode()

@@ -63,10 +63,11 @@ import string
 import sys
 import threading
 import time
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from darwin import crawlers
+from darwin.httpbase import QuietHandler
 
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8088"))
@@ -355,13 +356,7 @@ def render(path, query, headers, client):
     return 404, "text/html", "<html><body>Not Found</body></html>"
 
 
-class TrapHandler(BaseHTTPRequestHandler):
-    server_version = "nginx/1.24.0"
-    sys_version = ""
-
-    def log_message(self, *args):
-        pass
-
+class TrapHandler(QuietHandler):
     def do_GET(self):
         t0 = time.time()
         u = urlparse(self.path)
@@ -505,10 +500,7 @@ def stats() -> dict:
 DASHBOARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
 
 
-class AdminHandler(BaseHTTPRequestHandler):
-    def log_message(self, *args):
-        pass
-
+class AdminHandler(QuietHandler):
     def do_GET(self):
         if self.path.startswith("/stats"):
             body, ctype = json.dumps(stats()).encode(), "application/json"

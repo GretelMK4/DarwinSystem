@@ -30,10 +30,11 @@ import json
 import random
 import threading
 import time
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer
 from urllib.parse import urlparse
 
 from darwin import intel
+from darwin.httpbase import QuietHandler
 from darwin.judith import pitcher as ts
 
 BRANDS = ["Vaultline", "Ledgerly", "Northgate", "KeyNest", "Brightpay", "Coldharbor",
@@ -146,12 +147,8 @@ class Hercules:
     def handler(self, site):
         herc = self
 
-        class H(BaseHTTPRequestHandler):
+        class H(QuietHandler):
             server_version = site["header"]
-            sys_version = ""
-
-            def log_message(self, *a):
-                pass
 
             def do_GET(self):
                 t0 = time.time()

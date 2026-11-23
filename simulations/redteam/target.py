@@ -67,8 +67,7 @@ class Shoppers:
                     body = e.read().decode(errors="ignore")
                     if e.code == 403 and body.startswith(fs.CHALLENGE_PREFIX):
                         self.bump("puzzles")
-                        time.sleep(1.0)
-                        hdr[fs.CHALLENGE_HEADER] = body[len(fs.CHALLENGE_PREFIX):]
+                        hdr[fs.CHALLENGE_HEADER] = fs.solve_challenge(body)   # real proof of work
                         continue
                     if e.code == 503:
                         self.bump("busy")
