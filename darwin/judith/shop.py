@@ -58,15 +58,18 @@ Optional alarm signals
                     fake keys it issued, surge reports) on the admin port.
                     Requires DARWIN_INTEL_KEY; see darwin/intel.py.
 
-The Spider (SPIDER=alert|seal|off, default alert)
+The Spider (SPIDER=seal|alert|off, default seal)
     Judith's internal watcher for patient attackers; see spider.py. It keeps a
     ledger per source address and flags behaviour the owner has not approved
     (too many different products, number-by-number enumeration, clockwork
     timing, many User-Agents from one address) and any change to Darwin's own
-    files. alert = write flags for people (results/spider_flags.jsonl and the
-    stats port) and change nothing about how visitors are served. seal = also
-    seal every visitor from a flagged address; choose it only after setting
-    the thresholds from your own traffic.
+    files. Every flag is written for people (results/spider_flags.jsonl and
+    the stats port). seal (the default) = Judith also seals every visitor from
+    a flagged address, silently, like any other seal: the visitor keeps
+    getting pages and leaves believing it succeeded. alert = flag only.
+    People who share one address share one ledger, so set the thresholds from
+    your own traffic, or use alert, where many real users sit behind one
+    address.
 
 Verified search crawlers (VERIFY_CRAWLERS=on, the default) always get the real
 site and are never sealed, counted or challenged. See darwin/crawlers.py.
@@ -157,7 +160,7 @@ INTEL_MAX = 200_000                                   # most identities / keys r
 INTEL_VERIFIER = None                                 # set in main() when INTEL=on
 INTEL_REJECTED = collections.Counter()
 CRAWLERS = crawlers.CrawlerVerifier()
-SPIDER_MODE = os.environ.get("SPIDER", "alert")       # alert (default) | seal | off
+SPIDER_MODE = os.environ.get("SPIDER", "seal")        # seal (default) | alert | off
 SPIDER = None                                         # the Spider object, created in main()
 SPIDER_SEALED = set()                                 # addresses the Spider flagged (seal mode)
 SPIDER_FLAGS = []                                     # what it has raised, for the stats port

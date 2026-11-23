@@ -315,9 +315,10 @@ Done:
 - Fast linking is off by default, with a warning.
 - **The Spider**, a first working version of the phase 2 internal watcher: a ledger per
   source address with owner-set rules, and fingerprints of Darwin's own files. On by
-  default in alert mode: it writes flags for people and treats no visitor differently.
-  `SPIDER=seal` lets Judith seal what it flags (the mode used in the patient red-team
-  run); `SPIDER=off` turns it off.
+  default in seal mode, the mode used in the patient red-team run: it writes flags for
+  people and Judith silently seals the flagged address. `SPIDER=alert` flags only;
+  `SPIDER=off` turns it off. The swarm and ecosystem simulations run it in alert mode,
+  because all their visitors share one address.
 - Hercules identifies visitors by address plus User-Agent. Sharing the User-Agent alone
   would have let an attacker get every real shopper with a popular browser sealed.
 - The red-team target can run the whole ecosystem, and its simulated shoppers arrive
@@ -335,10 +336,10 @@ Not done, and why:
 ## 5. Known weaknesses
 
 1. Without the Spider, a patient swarm that stays under the thresholds is not detected
-   and takes everything. In its default alert mode the Spider detects that swarm but
-   does not stop it; a person has to act. In seal mode each address is limited to a
-   shopper-sized slice (150 products by default), so an attacker needs many addresses.
-   That case is untested, and people who share an address share the limit.
+   and takes everything. With it (on by default, sealing what it flags) each address is
+   limited to a shopper-sized slice (150 products by default), so an attacker needs many
+   addresses. That case is untested. People who share an address share the limit, and
+   in seal mode they can be shown fake pages together.
 2. An attacker with a trusted outside copy of the data can tell real from fake.
 3. Attackers with valid logins who ignore bait are mostly invisible to deception.
 4. Each alarm can be avoided by an attacker who knows its trigger. This code is public,

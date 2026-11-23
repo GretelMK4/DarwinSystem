@@ -25,17 +25,20 @@ rules that the site owner sets:
                         longer matches the fingerprint taken at start-up.
 
 Every flag is a record for people: when, who, which rule, and the evidence.
-What happens next is the owner's choice. By default the shop only alerts
-(SPIDER=alert): the Spider watches and reports, and no visitor is treated
-differently because of it. SPIDER=seal also lets Judith seal a flagged
-address. SPIDER=off turns the Spider off.
+What happens next is the owner's choice. By default (SPIDER=seal) Judith also
+seals the flagged address. The seal is silent: the visitor is moved to the
+shadow site, keeps receiving pages, and leaves confident, which is what the
+rest of the system relies on. A Spider that announced itself would teach the
+swarm what to avoid. SPIDER=alert flags without acting; SPIDER=off turns the
+Spider off.
 
 Limits, stated plainly
   - Rules are per source address. An attacker with many addresses gets
     BREADTH products from each before anything is flagged. People who share
     one address (an office, a mobile carrier) share one ledger and can be
-    flagged together: set BREADTH from your own traffic, and prefer
-    SPIDER=alert until you have.
+    flagged and, in the default seal mode, shown fake pages together. Set
+    BREADTH from your own traffic, and use SPIDER=alert until you have if
+    many real users reach you through one address.
   - The rules and their defaults are public. An attacker who has read this
     file can stay under them; the price is that each address is then limited
     to a shopper-sized slice of the catalog.
