@@ -210,7 +210,9 @@ def test_pitcher_ignores_verified_crawlers(pitcher_url, monkeypatch):
 
 def test_spider_seals_a_slow_copier_and_leaves_shoppers_alone(shop_url, monkeypatch):
     from darwin.judith import spider as spider_mod
-    watcher = spider_mod.Spider(on_flag=shop.spider_flag)
+    # this test sends requests at machine speed, so the clockwork-timing rule is switched off here;
+    # tests/test_spider.py covers it with a controlled clock
+    watcher = spider_mod.Spider(spider_mod.Policy({"SPIDER_METRONOME_CV": "0"}), on_flag=shop.spider_flag)
     monkeypatch.setattr(shop, "SPIDER", watcher)
     monkeypatch.setattr(shop, "SPIDER_MODE", "seal")
     monkeypatch.setitem(shop.STATE, "lockdown_at", None)                  # earlier tests may have locked the shop down
