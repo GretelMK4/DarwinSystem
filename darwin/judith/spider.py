@@ -1,5 +1,5 @@
 """
-The Spider: Judith's internal watcher (roadmap phase 2, first working version).
+The Spider: Judith's internal watcher (roadmap phase 2, released as a first version).
 
 The pitchers and tripwires catch attackers who are greedy or fast. A patient
 attacker stays under every rate threshold and never touches bait, so nothing

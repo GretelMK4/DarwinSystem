@@ -1,8 +1,9 @@
 # The Darwin System
 
 **Defensive deception against automated AI attack swarms.** Three traps modeled on
-carnivorous plants, wired together so each one makes the others stronger. They lure
-automated attackers in, keep them busy with convincing fakes, and warn people early.
+carnivorous plants, plus an internal watcher called the Spider, wired together so each
+one makes the others stronger. They lure automated attackers in, keep them busy with
+convincing fakes, and warn people early.
 
 > **Research prototype.** Tested only in simulations, including live red-team attacks
 > by Claude Opus 5.5 (medium effort) and Claude Fable 5.2 agents. Not yet tested on production systems.
@@ -27,6 +28,7 @@ gives attackers something to waste their time on.
 |---|---|---|---|
 | **Judith** | pitcher plant (pitfall) | inside a real website you protect | Bait leads into endless generated mazes and a fake API where planted keys "work". Past a set depth the trap seals one way: that visitor now sees a shadow copy of the site with believable fake data. Several pitchers per site, a lockdown when alarms combine. |
 | **Hercules** | sundew (flypaper) | a farm of fake servers with no real purpose | No legitimate visitor ever arrives, so everything is sticky from the first request. Whatever it catches (visitor identities, the fake keys it handed out, sweep surges) is shared with Judith as signed intel. |
+| **The Spider** | internal watcher (not a plant) | inside Judith's site | Keeps a ledger of what every visitor address does and flags what the owner has not approved, such as one address reading far more of the catalog than any shopper. Catches the patient attackers the traps miss. |
 | **Venus** | flytrap (snap trap) | phones and workstations | Decoy files and hidden decoy apps act as trigger hairs. Touching one pauses the suspect app; repeated touches cut the device's network and alert the user. |
 
 Connected, the plants cover each other's blind spots. In testing each plant alone was
@@ -194,16 +196,27 @@ the design sessions; its raw files are not in this repository yet.
 
 ## Roadmap
 
-- **Phase 1: the three plants.** Design complete; this release. Judith and Hercules as
-  local prototypes, Venus as a model.
-- **Phase 2: the spider.** An internal watcher that lives inside the site, like an
-  immune cell. It inspects the site and Darwin itself and alerts people when something
-  is not approved. Aimed at slow attackers. It is not an AI agent. A first version is
-  in this release (`darwin/judith/spider.py`) and caught three patient AI agents in a
-  live test; it still needs testing against attackers with many addresses, real shopper
-  traffic, and an intruder who tampers with Darwin from the inside.
-- **Phase 3: protected communication.** Hardening the messages between the plants so
-  they cannot be tampered with or read: per-plant keys, rotation, encrypted transport.
+| Phase | Status |
+|---|---|
+| **1. The three plants** | **Released.** Judith and Hercules as working local prototypes, Venus as a model. |
+| **2. The Spider** | **Released, first version.** Built, on by default, and it caught three patient AI agents in a live test. |
+| **3. Protected communication** | **Next.** Basic signing between Hercules and Judith is already in; the rest is not started. |
+
+**Phase 1: the three plants.** Design complete and in this release.
+
+**Phase 2: the Spider.** An internal watcher that lives inside the site, like an immune
+cell. It inspects the site and Darwin itself on a slow cycle and flags whatever the
+owner has not approved, and Judith silently seals what it flags. It is not an AI agent.
+What phase 2 still owes before it can be called finished:
+
+- a test against attackers who spread across many addresses
+- thresholds set from real shopper traffic, and a way to handle people who share an address
+- the watcher extended beyond the web shop (databases, file stores, the other plants)
+- a test against an intruder who tampers with Darwin from the inside
+
+**Phase 3: protected communication.** Messages between the plants that cannot be forged,
+replayed, read or silenced: per-plant keys, key rotation, encrypted transport, and a
+Spider that cannot be switched off by whoever it is watching.
 
 Also needed before anyone should depend on this: independent red teams, a few weeks of
 Judith and Hercules on an isolated server to see what real bots do, and a first Venus

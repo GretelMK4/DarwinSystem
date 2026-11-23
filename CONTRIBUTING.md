@@ -16,7 +16,7 @@ Contributions that break it will not be merged.
    without reading the defence code first. Report what you got and how.
 3. **Real-world baselines.** Thresholds here were tuned to simulated traffic. Data on how
    real shoppers and real crawlers behave is welcome, with nothing personal in it.
-4. **The roadmap.** See the README: the internal watcher (phase 2) and protected
+4. **The roadmap.** See the README: what the Spider (phase 2) still owes, and protected
    communication between the plants (phase 3).
 
 ## Ground rules for code
