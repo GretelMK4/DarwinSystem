@@ -186,12 +186,38 @@ The catalog row is the patient-swarm weakness again.
 `python -m simulations.models.real_attacks_replay`
 
 Each case follows the publicly reported path of a real incident and asks where a Darwin
-trap could have fired. The probabilities are the authors' estimates, so treat the output
-as a structured guess. Darwin raised an alert at some point in 80 to 99% of replays. It
-raised one **before the damage began** in 5 to 97%, depending on the case: high where
-attackers explored for weeks, low where they used valid logins and moved within hours.
-The incident summaries in that file were written from memory of public reporting and
-should be checked against primary sources before being quoted.
+trap could have fired. The incident facts were checked on 23 November 2026 against
+primary sources, which the file lists case by case: congressional testimony (Colonial
+Pipeline, Change Healthcare), the US Senate staff report on Target, the GAO and House
+reports on Equifax, MGM's securities filing, Mandiant's report on the Snowflake
+customer thefts, and Anthropic's report on the AI-run espionage campaign. The file also
+lists what the public record does not give and had to be assumed.
+
+The check changed three things. Target's attackers were inside for about a month, not
+two (entry 12 November, discovery 12 to 15 December). Change Healthcare's data was
+taken on days 5 to 8, later than first assumed. MGM's ransomware came three days after
+entry, not two, and most of the MGM timeline rests on the attackers' own account.
+
+**Every probability in this model is the authors' estimate.** Darwin was at none of
+these incidents. Read the table as a structured guess about where deception could help.
+
+| Incident | Real discovery | Alert before damage began | Main damage left, on average |
+|---|---|---|---|
+| Colonial Pipeline (2021) | day 8, by ransom note | 78% | ransomware 9%; data theft 19% |
+| Change Healthcare (2024) | day 9, by ransomware | 61% | ransomware 10%; data theft 22% |
+| MGM Resorts (2023) | about day 1 | 5% | hosts encrypted 8%; data theft 51% |
+| Target (2013) | day 30, told by the Justice Dept | 97% | card theft 10% |
+| Equifax (2017) | day 76 | 15% | records stolen 7% |
+| Snowflake customers (2024), per victim | unknown; taken as day 30 | 32% | tables copied 14% |
+| AI-run espionage, GTG-1002 (2025), per target | unknown; taken as day 3 | 92% | data extracted 2% |
+
+- Deception helps most where attackers explore for days before acting (Target, Colonial)
+  and least where they arrive with working logins and move within hours (MGM, Snowflake).
+- **Adding the Spider changed little here.** In the two cases where it could apply
+  (Equifax: one web server reading dozens of unrelated databases; Snowflake: one login
+  reading far more tables than usual) another trap almost always fired first. Damage
+  left went from 7% to 6% and from 14% to 11%. The Spider has only been built for and
+  tested on a web shop, so those two figures are the least certain in the table.
 
 ### The revealing spider (model, shelved)
 
