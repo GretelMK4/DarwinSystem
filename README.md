@@ -5,7 +5,7 @@ carnivorous plants, wired together so each one makes the others stronger. They l
 automated attackers in, keep them busy with convincing fakes, and warn people early.
 
 > **Research prototype.** Tested only in simulations, including live red-team attacks
-> by Claude Opus 5.5 (medium effort) agents. Not yet tested on production systems.
+> by Claude Opus 5.5 (medium effort) and Claude Fable 5.2 agents. Not yet tested on production systems.
 
 A project of **GretelMK4**. Apache License 2.0. Python standard library only.
 
@@ -106,7 +106,7 @@ simulations/
   models/      infrastructure.py, corporate.py, real_attacks_replay.py, spider.py
   redteam/     target.py, score.py
 tests/         unit and server tests
-docs/          FINDINGS.md, RESPONSIBLE_USE.md, writeup.html
+docs/          FINDINGS.md, RESPONSIBLE_USE.md, writeup.html, redteam/ (raw red-team results)
 ```
 
 Every module's docstring explains its settings and how to run it.
@@ -122,6 +122,7 @@ Full detail, with the command behind every number, is in
 |---|---|---|
 | 150 bots copying a 3,000-item catalog | 100% stolen (standard rate limit) | 27% stolen; 73% of the swarm's haul was fake |
 | 300 adaptive bots, full ecosystem, 6,000 items | 100% stolen | 0.2% stolen; 99.8% of the haul was fake |
+| Live red team: three Claude Fable 5.2 agents, 6,000 items, Hercules connected | not run | 2 products stolen; the agents were 90 to 98% sure their copies were genuine |
 | Live red team: three Claude Opus 5.5 agents, 6,000 items | not run | 1.8% stolen; one agent believed it had everything |
 | Bots that chose the trap as their first target (fake internet of 61 sites) | 1 of 40 with no bait | 33 of 40 with bait |
 
@@ -139,8 +140,8 @@ lockdown had to wait for a puzzle or got a "busy, retry" reply.
 - In the critical-infrastructure model, attackers with stolen logins still reached a
   controller in 39% of trials.
 
-The live red-team result is reported from the design sessions; its raw files are not in
-this repository yet.
+The Fable 5.2 red-team run is in `docs/redteam/`. The Opus 5.5 result is reported from
+the design sessions; its raw files are not in this repository yet.
 
 ## Honest limits
 

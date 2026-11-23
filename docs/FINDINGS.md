@@ -203,9 +203,31 @@ from 526 to between 569 and 1,152, and the swarm's ability to spot Darwin rose f
 to as much as 83%. Quiet deception that stays secret is what makes the shared ecosystem
 work, so this idea was dropped. It is unrelated to the phase 2 spider on the roadmap.
 
-## 2. Live red team by AI agents (reported from the design sessions)
+## 2. Live red teams by AI agents
 
-The only tests where the attacker was not written by the defenders. Three Claude
+The only tests where the attacker was not written by the defenders.
+
+### Three Claude Fable 5.2 agents, with Hercules connected (23 November 2026)
+
+Run on the release code; raw results are in
+[docs/redteam/2026-11-23-fable-5.2](redteam/2026-11-23-fable-5.2/README.md).
+
+- The agents obtained **2 real products of 6,000**. They kept 6,000 pages; 5,998 were
+  shadow-site fakes. They rated their own loot 98%, 97% and 90% likely genuine.
+- Shoppers loaded 914 pages during the run, all genuine, with no puzzles or delays.
+- All three agents recognised the bait folders, the hidden links and the Hercules hosts
+  as traps. They were caught anyway by the hidden link (one identity), the crowd
+  tripwires (lockdown at 110 s) and the rate rule.
+- Their own checks fooled them: repeated passes agreed, because the shadow serves every
+  sealed visitor the same fake.
+- All agents shared one address, and agents with the same User-Agent count as one
+  visitor, which helped the defence. All were fast and loud. One run.
+- The run showed that the shop's own "people" counters mislabel attackers that use a
+  browser-style User-Agent. Shopper figures here come from the test harness instead.
+
+### Three Claude Opus 5.5 agents (reported from the design sessions)
+
+Three Claude
 Opus 5.5 (medium effort) agents, with no knowledge of Darwin and no access to the
 server's code, attacked the shop together and tried to copy its 6,000-product catalog
 while 12 simulated shoppers browsed. Rules: localhost only, one source address.
@@ -226,13 +248,13 @@ while 12 simulated shoppers browsed. Rules: localhost only, one source address.
 - When agents cross-checked each other's copies, the copies agreed, because every
   sealed visitor is served the same fake. They read agreement as proof the data was real.
 
-**The raw files of the second run (loot, server logs, scores, each agent's report) are
-not in this repository yet.** Until they are added, treat this section as a report and
-not as reproducible evidence. Anyone can run a new red team with
+**The raw files of these two Opus runs (loot, server logs, scores, each agent's report)
+are not in this repository yet.** Until they are added, treat them as a report and not
+as reproducible evidence. Anyone can run a new red team with
 `python -m simulations.redteam.target` and `python -m simulations.redteam.score`.
 
-What these runs do not show: only loud, fast attackers were tested; all agents shared
-one address; only Judith was attacked, not Hercules or Venus.
+What none of the three runs show: only loud, fast attackers were tested; all agents
+shared one address; Venus has never been attacked live.
 
 ## 3. Reported from the design sessions, code not in this repository
 
