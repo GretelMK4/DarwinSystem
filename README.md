@@ -77,7 +77,7 @@ The full ecosystem against a 300-bot swarm (about one to two minutes):
 
 ```
 python -m simulations.ecosystem.full ecosystem
-SWARM=v4x python -m simulations.ecosystem.full eco_v3
+SWARM=v4b python -m simulations.ecosystem.full eco_v3
 ```
 
 Tests:
@@ -113,7 +113,34 @@ Every module's docstring explains its settings and how to run it.
 
 ## Results so far
 
-RESULTS_PLACEHOLDER
+Full detail, with the command behind every number, is in
+[docs/FINDINGS.md](docs/FINDINGS.md). The short version:
+
+**Against loud, fast swarms the traps work, and people are not harmed.**
+
+| Test | Without Darwin | With Darwin |
+|---|---|---|
+| 150 bots copying a 3,000-item catalog | 100% stolen (standard rate limit) | 27% stolen; 73% of the swarm's haul was fake |
+| 300 adaptive bots, full ecosystem, 6,000 items | 100% stolen | 0.2% stolen; 99.8% of the haul was fake |
+| Live red team: three Claude Opus 5.5 agents, 6,000 items | not run | 1.8% stolen; one agent believed it had everything |
+| Bots that chose the trap as their first target (fake internet of 61 sites) | 1 of 40 with no bait | 33 of 40 with bait |
+
+In every web test, simulated shoppers saw zero fake pages. A few who arrived during a
+lockdown had to wait for a puzzle or got a "busy, retry" reply.
+
+**Against patient or well-informed attackers they do not.**
+
+- A swarm that knew every threshold was never detected. It took 3% of the catalog in a
+  90-second test only because it chose to go slowly.
+- In the 24-hour model, a patient swarm takes 100% of the catalog from the code as
+  released.
+- Each defence in turn was beaten outright (100% stolen) by the first swarm that avoided
+  its trigger.
+- In the critical-infrastructure model, attackers with stolen logins still reached a
+  controller in 39% of trials.
+
+The live red-team result is reported from the design sessions; its raw files are not in
+this repository yet.
 
 ## Honest limits
 
@@ -123,9 +150,11 @@ RESULTS_PLACEHOLDER
   agents that had not seen the defence is the only result here not graded by our own
   attacker model, and it was a single run against loud, fast attackers.
 - **A patient attacker wins against the code as released.** In the model, a swarm that
-  stays under every threshold takes the whole catalog in 24 hours. The countermeasures
-  that slow it down exist only as a model, and the best of them still loses most of the
-  catalog.
+  stays under every threshold takes the whole catalog in 24 hours. The one modelled
+  countermeasure that cuts this to about a fifth does it by wrongly sealing about 2% of
+  real shoppers, so it is off by default and not implemented in the shop.
+- **This code is public.** Assume attackers know every trigger, default and file name.
+  A real deployment must change the bait, the paths and the thresholds.
 - **The fakes fail against any trusted outside copy:** an older scrape, a
   price-comparison site, or a person checking from an ordinary connection. The shadow
   site works only when the attacker has nothing real to compare against.
@@ -138,8 +167,10 @@ RESULTS_PLACEHOLDER
   one or two runs each; results move from run to run.
 - **Not hardened.** The dashboard and stats ports have no login and rely on being bound
   to localhost. Per-visitor state is kept in memory without a size limit. The entry
-  challenge is a one-second delay, not a proof of work. All plants share one intel key,
-  and intel travels unencrypted.
+  puzzle costs a bot a fraction of a second per identity. All plants share one intel
+  key, and intel travels unencrypted.
+- **One address per swarm.** Every test used a single source address with rotating
+  User-Agents. Nothing here has been tested against an attacker with many addresses.
 - **Identity is IP address plus User-Agent.** Visitors behind one shared address with
   the same browser look like one visitor.
 - **Venus does not exist as software yet**, and what a phone platform allows a decoy
