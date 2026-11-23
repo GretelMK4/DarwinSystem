@@ -46,7 +46,7 @@ Settings (environment variables)
   NAMES=rich|basic      rich = folder names from word combinations (resists loop detection)
   HONEY_API=on|off      off = harvested keys are rejected (for comparison tests)
   DIGEST_DEPTH=4  SEAL_TTL=86400  SCOUTS=off  GOLD_DEPTH=3  RELEASE_AFTER=0
-  VERIFY_CRAWLERS=on|off  TRAP_LOG=trap_log.jsonl
+  VERIFY_CRAWLERS=on|off  TRAP_LOG=results/trap_log.jsonl
 
 Research prototype. The dashboard has no login and the server keeps per-visitor
 state in memory without a size limit: do not expose it to the internet as is.
@@ -67,6 +67,7 @@ from http.server import ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from darwin import crawlers
+from darwin.results import RESULTS_DIR
 from darwin.httpbase import QuietHandler
 
 HOST = os.environ.get("HOST", "127.0.0.1")
@@ -74,7 +75,7 @@ PORT = int(os.environ.get("PORT", "8088"))
 ADMIN_PORT = int(os.environ.get("ADMIN_PORT", "8089"))
 DRIP = float(os.environ.get("DRIP", "0.02"))
 CHUNK = int(os.environ.get("CHUNK", "256"))
-LOG = os.environ.get("TRAP_LOG", "trap_log.jsonl")          # empty string = no request log
+LOG = os.environ.get("TRAP_LOG", os.path.join(RESULTS_DIR, "trap_log.jsonl"))   # empty string = no request log
 RICH = os.environ.get("NAMES", "rich") == "rich"
 DIGEST_DEPTH = int(os.environ.get("DIGEST_DEPTH", "4"))
 SEAL_TTL = float(os.environ.get("SEAL_TTL", str(24 * 3600)))   # seal expires after this
@@ -515,6 +516,8 @@ class AdminHandler(QuietHandler):
 
 
 def main():
+    if LOG:
+        os.makedirs(os.path.dirname(os.path.abspath(LOG)), exist_ok=True)
     if HOST not in ("127.0.0.1", "localhost", "::1"):
         print(f"WARNING: binding to {HOST}. This is a research prototype; see the limits in README.md "
               "before exposing it to a network.", file=sys.stderr)
