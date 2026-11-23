@@ -641,7 +641,10 @@ def main():
     v3 = cfg.get("v3", False)
     fixes = (set(FIXES_ALL + (["spike", "enum", "probation", "challenge", "cap"] if v3 else [])) - FIX_OFF) if v2 else set()
     intel_key = intel.new_key()          # a fresh shared key for this run only
-    env = dict(os.environ, MODE=cfg["judith"], **{intel.ENV_KEY: intel_key}, CATALOG=str(CATALOG), INTEL="on" if cfg["share"] else "off",
+    # Every bot and every simulated shopper here comes from 127.0.0.1. The Spider keeps one ledger per
+    # address, so in its default seal mode it would seal the shoppers along with the swarm. These
+    # simulations therefore run it in alert mode unless told otherwise.
+    env = dict(os.environ, MODE=cfg["judith"], SPIDER=os.environ.get("SPIDER", "alert"), **{intel.ENV_KEY: intel_key}, CATALOG=str(CATALOG), INTEL="on" if cfg["share"] else "off",
                HONEYLINKS="on" if "honeylinks" in fixes else "off", SURGE="on" if "surge" in fixes else "off")
     if v3:
         # The puzzle is real but easy here (8 bits) and the server enforces a 0.9 s wait instead, so that

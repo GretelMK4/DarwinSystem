@@ -352,7 +352,10 @@ def main():
     n_bots = int(sys.argv[2]) if len(sys.argv) > 2 else 150
     seed = int(sys.argv[3]) if len(sys.argv) > 3 else 7
     rng = random.Random(seed)
-    env = dict(os.environ, MODE=mode, CATALOG=str(CATALOG))
+    # Every bot and every simulated shopper here comes from 127.0.0.1. The Spider keeps one ledger per
+    # address, so in its default seal mode it would seal the shoppers along with the swarm. These
+    # simulations therefore run it in alert mode unless told otherwise.
+    env = dict(os.environ, MODE=mode, CATALOG=str(CATALOG), SPIDER=os.environ.get("SPIDER", "alert"))
     srv = subprocess.Popen(common.server_cmd("darwin.judith.shop"), env=env, cwd=common.ROOT,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(1.5)

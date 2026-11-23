@@ -1,0 +1,28 @@
+loot_1.jsonl: unique real 25, unique fake/other 135, unparseable 0
+loot_2.jsonl: unique real 35, unique fake/other 1017, unparseable 0
+loot_3.jsonl: unique real 39, unique fake/other 520, unparseable 0
+TEAM: real products obtained 99 of 6000 (1.6%); fake or decoy pages kept 1672 (94.4% of what the team kept)
+{
+ "lockdown_at_s": null,
+ "real_items_stolen": 0,
+ "fake_items_served": 1673,
+ "bot_identities_seen": 1,
+ "bot_identities_sealed": 0,
+ "seals_by_trigger": {
+  "spider": 3
+ },
+ "triggers_by_pitcher": {
+  "spider": 3
+ },
+ "bot_requests": {
+  "real": 1
+ },
+ "shoppers": {
+  "visits": 303,
+  "pages": 4081,
+  "fake": 0,
+  "busy": 0,
+  "puzzles": 0,
+  "errors": 0
+ }
+}

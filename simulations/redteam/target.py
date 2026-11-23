@@ -12,17 +12,22 @@ in files named loot_*.jsonl. Score the result afterwards with
 Rules that keep the test honest and safe:
   - attackers target 127.0.0.1 only, and only this server
   - attackers do not read the server's code, logs or the stats port
-  - the shoppers below browse during the whole run, so every defence is also
-    measured against people
+  - the shoppers below browse during the whole run, each from their own
+    address, so every defence is also measured against people
 
 Whole-ecosystem mode: set HERCULES=<n> to also start n Hercules decoy sites on
 ports 9500 and up, connected to the shop by signed intel. An attacker identity
 seen on a decoy site, or a fake key issued there, is then sealed at the shop.
 (Venus is a model with no device code, so it cannot take part in a live test.)
 
-Usage: [HERCULES=8] python -m simulations.redteam.target [minutes] [output folder]
+The Spider (darwin/judith/spider.py) runs in its default seal mode: Judith
+seals what it flags. Set SPIDER=alert to flag only, or SPIDER=off to run
+without it. Its flags are written to spider_flags.jsonl in the output folder.
+
+Usage: [HERCULES=8] [SPIDER=seal] python -m simulations.redteam.target [minutes] [output folder]
        defaults: 45 minutes, results/redteam_ground
 """
+import http.client
 import json
 import os
 import random
@@ -30,7 +35,6 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.error
 import urllib.request
 
 CATALOG = 6000
@@ -45,47 +49,73 @@ ADMIN = "http://127.0.0.1:8089"
 N_SHOPPERS = 12
 
 
+BROWSERS = ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Safari/605.1.15",
+            "Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"]
+
+
 class Shoppers:
-    """Simulated people: one product every 3-8 seconds, waiting out challenges and 'busy' replies."""
+    """
+    Simulated people. Each of the N_SHOPPERS slots is a stream of visits: a shopper arrives
+    from their own address (127.0.9.x to 127.0.14.x) with an ordinary browser User-Agent,
+    looks at 4 to 25 products with 3 to 8 seconds between them (going back to one they
+    have seen about one time in five), and leaves. Then the next shopper arrives.
+    Every page received is compared with the real catalog.
+    """
 
     def __init__(self):
         self.stop = threading.Event()
         self.lock = threading.Lock()
-        self.counts = {"pages": 0, "fake": 0, "busy": 0, "puzzles": 0, "errors": 0}
+        self.counts = {"visits": 0, "pages": 0, "fake": 0, "busy": 0, "puzzles": 0, "errors": 0}
 
     def bump(self, key, n=1):
         with self.lock:
             self.counts[key] += n
 
+    def fetch(self, address, hdr, n):
+        """One product page from the shopper's own source address. Returns (status, body)."""
+        conn = http.client.HTTPConnection("127.0.0.1", 8088, timeout=15, source_address=(address, 0))
+        try:
+            conn.request("GET", f"/shop/item/{n}", headers=dict(hdr, Connection="close"))
+            r = conn.getresponse()
+            return r.status, r.read().decode(errors="ignore")
+        finally:
+            conn.close()
+
     def shop(self, i):
         rng = random.Random(900 + i)
-        hdr = {"User-Agent": f"Mozilla/5.0 (shopper-{i})"}
         while not self.stop.is_set():
-            n = rng.randint(1, CATALOG)
-            for _ in range(3):
-                try:
-                    req = urllib.request.Request(f"{SHOP}/shop/item/{n}", headers=hdr)
-                    with urllib.request.urlopen(req, timeout=15) as r:
-                        text = r.read().decode(errors="ignore")
-                    self.bump("pages")
-                    self.bump("fake", int(text != fs.item_page(n)))
-                    break
-                except urllib.error.HTTPError as e:
-                    body = e.read().decode(errors="ignore")
-                    if e.code == 403 and body.startswith(fs.CHALLENGE_PREFIX):
+            address = f"127.0.{rng.randint(9, 14)}.{rng.randint(1, 250)}"
+            hdr = {"User-Agent": rng.choice(BROWSERS)}
+            seen = []
+            self.bump("visits")
+            for _ in range(rng.randint(4, 25)):
+                if self.stop.is_set():
+                    return
+                n = rng.choice(seen) if seen and rng.random() < 0.2 else rng.randint(1, CATALOG)
+                seen.append(n)
+                for _ in range(3):
+                    try:
+                        status, text = self.fetch(address, hdr, n)
+                    except Exception:
+                        self.bump("errors")
+                        break
+                    if status == 200:
+                        self.bump("pages")
+                        self.bump("fake", int(text != fs.item_page(n)))
+                        break
+                    if status == 403 and text.startswith(fs.CHALLENGE_PREFIX):
                         self.bump("puzzles")
-                        hdr[fs.CHALLENGE_HEADER] = fs.solve_challenge(body)   # real proof of work
+                        hdr[fs.CHALLENGE_HEADER] = fs.solve_challenge(text)   # real proof of work
                         continue
-                    if e.code == 503:
+                    if status == 503:
                         self.bump("busy")
                         time.sleep(2)
                         continue
                     self.bump("errors")
                     break
-                except Exception:
-                    self.bump("errors")
-                    break
-            self.stop.wait(rng.uniform(3, 8))
+                self.stop.wait(rng.uniform(3, 8))
 
     def snapshot(self):
         with self.lock:
@@ -118,6 +148,8 @@ def main(minutes=45.0, out=None, n_hercules=0):
     os.makedirs(out, exist_ok=True)
     env = dict(os.environ, MODE="lockdown", CATALOG=str(CATALOG), HONEYLINKS="on", SURGE="on",
                TRIPWIRES="on", ALARM_K="2", ENUM_N="60", PROB_BUDGET="1000000000", INTEL="off")
+    if env.get("SPIDER", "seal") != "off":
+        env["SPIDER_LOG"] = os.path.join(out, "spider_flags.jsonl")
     herc = None
     if n_hercules:
         key = intel.new_key()

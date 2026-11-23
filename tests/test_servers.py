@@ -45,6 +45,20 @@ def get(url, ua, headers=None):
         return e.code, e.read().decode()
 
 
+def get_from(address, url, ua):
+    """GET from a chosen loopback source address (any 127.x.y.z address works on Linux)."""
+    import http.client
+    from urllib.parse import urlsplit
+    u = urlsplit(url)
+    conn = http.client.HTTPConnection(u.hostname, u.port, timeout=10, source_address=(address, 0))
+    try:
+        conn.request("GET", u.path, headers={"User-Agent": ua, "Connection": "close"})
+        r = conn.getresponse()
+        return r.status, r.read().decode()
+    finally:
+        conn.close()
+
+
 def post(url, obj):
     req = urllib.request.Request(url, data=json.dumps(obj).encode(), method="POST")
     try:
@@ -146,12 +160,16 @@ def test_only_signed_intel_is_accepted(shop_url, admin_url):
     assert "Mozilla/5.0 (innocent)" not in shop.INTEL_IDS
     assert not any(p == "hercules_surge" for _, p in shop.TRIGGERS)
 
-    good = intel.sign({"identities": ["bot-seen-on-hercules"], "tokens": ["k" * 28], "surge": False}, KEY)
+    good = intel.sign({"identities": ["127.0.0.1|bot-seen-on-hercules", "127.0.0.77|Common Browser UA"], "tokens": ["k" * 28], "surge": False}, KEY)
     assert post(f"{admin_url}/intel", good) == 200
     assert post(f"{admin_url}/intel", good) == 403                          # replay
-    assert "bot-seen-on-hercules" in shop.INTEL_IDS
+    assert "127.0.0.1|bot-seen-on-hercules" in shop.INTEL_IDS
     assert get(f"{shop_url}/shop/item/9", "bot-seen-on-hercules")[1] != shop.item_page(9)
     assert post(f"{admin_url}/elsewhere", good) == 404
+    # an identity is address + User-Agent: an attacker who shows a popular browser's User-Agent to
+    # Hercules must not get every real shopper with that browser sealed
+    assert get(f"{shop_url}/shop/item/9", "Common Browser UA")[1] == shop.item_page(9)
+    assert get_from("127.0.0.77", f"{shop_url}/shop/item/9", "Common Browser UA")[1] != shop.item_page(9)
 
 
 # ---------------- the pitcher ----------------
@@ -186,6 +204,32 @@ def test_pitcher_ignores_verified_crawlers(pitcher_url, monkeypatch):
     home = get(f"{pitcher_url}/", GOOGLE_UA)
     assert home[0] == 200 and "<!--" not in home[1]
     assert f"127.0.0.1|{GOOGLE_UA}" not in pitcher.CLIENTS
+
+
+# ---------------- the Spider ----------------
+
+def test_spider_seals_a_slow_copier_and_leaves_shoppers_alone(shop_url, monkeypatch):
+    from darwin.judith import spider as spider_mod
+    # this test sends requests at machine speed, so the clockwork-timing rule is switched off here;
+    # tests/test_spider.py covers it with a controlled clock
+    watcher = spider_mod.Spider(spider_mod.Policy({"SPIDER_METRONOME_CV": "0"}), on_flag=shop.spider_flag)
+    monkeypatch.setattr(shop, "SPIDER", watcher)
+    monkeypatch.setattr(shop, "SPIDER_MODE", "seal")
+    monkeypatch.setitem(shop.STATE, "lockdown_at", None)                  # earlier tests may have locked the shop down
+    monkeypatch.setattr(shop, "TRIGGERS", [])
+    copier, shopper = "127.0.0.31", "127.0.0.32"
+    limit = watcher.policy.breadth
+    for n in range(1, 60):                                                # an ordinary visit
+        get_from(shopper, f"{shop_url}/shop/item/{n * 97 % 2900 + 1}", "Mozilla/5.0 (shopper)")
+    for n in range(1, limit + 2):                                         # far too slow to trip a rate rule in real life
+        assert get_from(copier, f"{shop_url}/shop/item/{n * 37 % 2900 + 1}", "Mozilla/5.0 (patient)")[0] == 200
+    flags = watcher.inspect()
+    assert [(f["subject"], f["rule"]) for f in flags] == [(copier, "breadth")]
+    assert shop.SPIDER_FLAGS[-1]["real_products_held_when_flagged"] == limit + 1
+    assert get_from(copier, f"{shop_url}/shop/item/2444", "Mozilla/5.0 (patient)")[1] != shop.item_page(2444)
+    assert get_from(copier, f"{shop_url}/shop/item/2445", "a brand new User-Agent")[1] != shop.item_page(2445)
+    assert get_from(shopper, f"{shop_url}/shop/item/2444", "Mozilla/5.0 (shopper)")[1] == shop.item_page(2444)
+    assert watcher.inspect() == []                                        # each flag is raised once
 
 
 # ---------------- server fingerprint ----------------

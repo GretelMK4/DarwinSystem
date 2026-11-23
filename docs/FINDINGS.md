@@ -186,12 +186,38 @@ The catalog row is the patient-swarm weakness again.
 `python -m simulations.models.real_attacks_replay`
 
 Each case follows the publicly reported path of a real incident and asks where a Darwin
-trap could have fired. The probabilities are the authors' estimates, so treat the output
-as a structured guess. Darwin raised an alert at some point in 80 to 99% of replays. It
-raised one **before the damage began** in 5 to 97%, depending on the case: high where
-attackers explored for weeks, low where they used valid logins and moved within hours.
-The incident summaries in that file were written from memory of public reporting and
-should be checked against primary sources before being quoted.
+trap could have fired. The incident facts were checked on 23 November 2026 against
+primary sources, which the file lists case by case: congressional testimony (Colonial
+Pipeline, Change Healthcare), the US Senate staff report on Target, the GAO and House
+reports on Equifax, MGM's securities filing, Mandiant's report on the Snowflake
+customer thefts, and Anthropic's report on the AI-run espionage campaign. The file also
+lists what the public record does not give and had to be assumed.
+
+The check changed three things. Target's attackers were inside for about a month, not
+two (entry 12 November, discovery 12 to 15 December). Change Healthcare's data was
+taken on days 5 to 8, later than first assumed. MGM's ransomware came three days after
+entry, not two, and most of the MGM timeline rests on the attackers' own account.
+
+**Every probability in this model is the authors' estimate.** Darwin was at none of
+these incidents. Read the table as a structured guess about where deception could help.
+
+| Incident | Real discovery | Alert before damage began | Main damage left, on average |
+|---|---|---|---|
+| Colonial Pipeline (2021) | day 8, by ransom note | 78% | ransomware 9%; data theft 19% |
+| Change Healthcare (2024) | day 9, by ransomware | 61% | ransomware 10%; data theft 22% |
+| MGM Resorts (2023) | about day 1 | 5% | hosts encrypted 8%; data theft 51% |
+| Target (2013) | day 30, told by the Justice Dept | 97% | card theft 10% |
+| Equifax (2017) | day 76 | 15% | records stolen 7% |
+| Snowflake customers (2024), per victim | unknown; taken as day 30 | 32% | tables copied 14% |
+| AI-run espionage, GTG-1002 (2025), per target | unknown; taken as day 3 | 92% | data extracted 2% |
+
+- Deception helps most where attackers explore for days before acting (Target, Colonial)
+  and least where they arrive with working logins and move within hours (MGM, Snowflake).
+- **Adding the Spider changed little here.** In the two cases where it could apply
+  (Equifax: one web server reading dozens of unrelated databases; Snowflake: one login
+  reading far more tables than usual) another trap almost always fired first. Damage
+  left went from 7% to 6% and from 14% to 11%. The Spider has only been built for and
+  tested on a web shop, so those two figures are the least certain in the table.
 
 ### The revealing spider (model, shelved)
 
@@ -206,6 +232,29 @@ work, so this idea was dropped. It is unrelated to the phase 2 spider on the roa
 ## 2. Live red teams by AI agents
 
 The only tests where the attacker was not written by the defenders.
+
+### Three patient Claude Fable 5.2 agents against the Spider (23 November 2026)
+
+Run on the release code; raw results are in
+[docs/redteam/2026-11-23-fable-5.2-patient-spider](redteam/2026-11-23-fable-5.2-patient-spider/README.md).
+
+The test Darwin was expected to lose. Each agent had its own address and 30 minutes, was
+told how the previous team had been fooled, and was told nothing about the Spider.
+
+- The agents kept 1,771 pages; **99 were genuine (1.6% of the catalog)**. They rated
+  their loot 90 to 95% likely genuine, and none believed it had been detected.
+- No pitcher, hidden link, tripwire or lockdown fired during the run. Every seal came
+  from the Spider, which flagged the three addresses after 5, 8 and 12 minutes, when
+  they held 38, 39 and 25 genuine pages.
+- All three browsed like a careful person: a listing page, then its ten products in
+  order. The Spider's enumeration rule caught that.
+- All three used canaries: pages saved while trusted and re-fetched to detect a switch
+  to fakes. The canaries never changed, because a sealed visitor who asks for a page it
+  already holds is given the real one.
+- Shoppers: 303 visits and 4,081 pages, all genuine, no flags, no delays.
+- The agents did not know the Spider's rules. The rules are public now: an attacker who
+  avoids number order and clockwork timing gets up to 150 products per address before
+  the breadth rule fires. One run.
 
 ### Three Claude Fable 5.2 agents, with Hercules connected (23 November 2026)
 
@@ -290,7 +339,17 @@ Done:
   Server header and a plain error page.
 - Request paths are escaped before being shown in generated pages.
 - Fast linking is off by default, with a warning.
-- 37 automated tests.
+- **The Spider**, a first working version of the phase 2 internal watcher: a ledger per
+  source address with owner-set rules, and fingerprints of Darwin's own files. On by
+  default in seal mode, the mode used in the patient red-team run: it writes flags for
+  people and Judith silently seals the flagged address. `SPIDER=alert` flags only;
+  `SPIDER=off` turns it off. The swarm and ecosystem simulations run it in alert mode,
+  because all their visitors share one address.
+- Hercules identifies visitors by address plus User-Agent. Sharing the User-Agent alone
+  would have let an attacker get every real shopper with a popular browser sealed.
+- The red-team target can run the whole ecosystem, and its simulated shoppers arrive
+  from their own addresses for visits of 4 to 25 products.
+- 45 automated tests.
 
 Not done, and why:
 
@@ -302,7 +361,11 @@ Not done, and why:
 
 ## 5. Known weaknesses
 
-1. A patient swarm that stays under the thresholds is not detected and takes everything.
+1. Without the Spider, a patient swarm that stays under the thresholds is not detected
+   and takes everything. With it (on by default, sealing what it flags) each address is
+   limited to a shopper-sized slice (150 products by default), so an attacker needs many
+   addresses. That case is untested. People who share an address share the limit, and
+   in seal mode they can be shown fake pages together.
 2. An attacker with a trusted outside copy of the data can tell real from fake.
 3. Attackers with valid logins who ignore bait are mostly invisible to deception.
 4. Each alarm can be avoided by an attacker who knows its trigger. This code is public,
