@@ -15,7 +15,12 @@ Rules that keep the test honest and safe:
   - the shoppers below browse during the whole run, so every defence is also
     measured against people
 
-Usage: python -m simulations.redteam.target [minutes] [output folder]
+Whole-ecosystem mode: set HERCULES=<n> to also start n Hercules decoy sites on
+ports 9500 and up, connected to the shop by signed intel. An attacker identity
+seen on a decoy site, or a fake key issued there, is then sealed at the shop.
+(Venus is a model with no device code, so it cannot take part in a live test.)
+
+Usage: [HERCULES=8] python -m simulations.redteam.target [minutes] [output folder]
        defaults: 45 minutes, results/redteam_ground
 """
 import json
@@ -30,6 +35,8 @@ import urllib.request
 
 CATALOG = 6000
 os.environ["CATALOG"] = str(CATALOG)
+from darwin import intel                # noqa: E402
+from darwin.hercules import honeyfarm   # noqa: E402
 from simulations import common          # noqa: E402
 from darwin.judith import shop as fs    # noqa: E402  (ground-truth pages only)
 
@@ -93,11 +100,31 @@ def fetch_stats():
     return st
 
 
-def main(minutes=45.0, out=None):
+def forward_intel(herc, key, stop):
+    """Pass whatever Hercules has caught to the shop as signed intel, twice a second."""
+    while not stop.wait(0.5):
+        envelope = herc.take_signed_intel(key)
+        if envelope is None:
+            continue
+        try:
+            urllib.request.urlopen(urllib.request.Request(
+                ADMIN + "/intel", data=json.dumps(envelope).encode(), method="POST"), timeout=5).read()
+        except Exception:
+            pass
+
+
+def main(minutes=45.0, out=None, n_hercules=0):
     out = out or common.results_path("redteam_ground")
     os.makedirs(out, exist_ok=True)
     env = dict(os.environ, MODE="lockdown", CATALOG=str(CATALOG), HONEYLINKS="on", SURGE="on",
                TRIPWIRES="on", ALARM_K="2", ENUM_N="60", PROB_BUDGET="1000000000", INTEL="off")
+    herc = None
+    if n_hercules:
+        key = intel.new_key()
+        env.update({"INTEL": "on", intel.ENV_KEY: key})
+        herc = honeyfarm.Hercules(n_hercules, diverse=True, seed=1, per_site_keys=True)
+        herc.start()
+        print("Hercules sites: " + ", ".join(f"http://127.0.0.1:{s['port']}" for s in herc.sites))
     with open(os.path.join(out, "server_err.txt"), "w") as err:
         srv = subprocess.Popen(common.server_cmd("darwin.judith.shop"), env=env, cwd=common.ROOT,
                                stdout=subprocess.DEVNULL, stderr=err)
@@ -105,6 +132,8 @@ def main(minutes=45.0, out=None):
         shoppers = Shoppers()
         for i in range(N_SHOPPERS):
             threading.Thread(target=shoppers.shop, args=(i,), daemon=True).start()
+        if herc:
+            threading.Thread(target=forward_intel, args=(herc, key.encode(), shoppers.stop), daemon=True).start()
         print(f"Target up at {SHOP} for {minutes:g} minutes. Output: {out}")
         t0 = time.time()
         try:
@@ -121,6 +150,9 @@ def main(minutes=45.0, out=None):
             shoppers.stop.set()
             final = fetch_stats()
             final["shoppers"] = shoppers.snapshot()
+            if herc:
+                final["hercules"] = herc.stats()
+                herc.stop()
             with open(os.path.join(out, "final.json"), "w") as f:
                 json.dump(final, f, indent=2)
             srv.terminate()
@@ -128,4 +160,5 @@ def main(minutes=45.0, out=None):
 
 
 if __name__ == "__main__":
-    main(float(sys.argv[1]) if len(sys.argv) > 1 else 45.0, sys.argv[2] if len(sys.argv) > 2 else None)
+    main(float(sys.argv[1]) if len(sys.argv) > 1 else 45.0, sys.argv[2] if len(sys.argv) > 2 else None,
+         n_hercules=int(os.environ.get("HERCULES", "0")))
