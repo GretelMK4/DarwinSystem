@@ -1,0 +1,455 @@
+<title>The Darwin System</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a field notebook for a greenhouse of traps. One reading column, specimen tags for the three plants,
+   CSS bar charts drawn to a 0-100 scale, a numbered log of experiment rounds (the order is real). */
+:root {
+  --bg: #eef2ee;
+  --paper: #f8faf7;
+  --ink: #13201a;
+  --muted: #55665d;
+  --rule: #cfd9d1;
+  --leaf: #1d7556;
+  --leaf-soft: #d5e9df;
+  --dew: #b3263e;
+  --dew-soft: #f4dade;
+  --amber: #9a6a00;
+  --bar-track: #dfe7e1;
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1512; --paper: #141d19; --ink: #dfe8e2; --muted: #93a69b; --rule: #26342d;
+    --leaf: #57c896; --leaf-soft: #17352a; --dew: #f2728a; --dew-soft: #3a1c23; --amber: #e0b14a;
+    --bar-track: #1f2b26; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1512; --paper: #141d19; --ink: #dfe8e2; --muted: #93a69b; --rule: #26342d;
+  --leaf: #57c896; --leaf-soft: #17352a; --dew: #f2728a; --dew-soft: #3a1c23; --amber: #e0b14a;
+  --bar-track: #1f2b26; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+.wrap { max-width: 980px; margin: 0 auto; }
+.prose { max-width: 66ch; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; line-height: 1.1; margin: 0; }
+h2 { font-size: clamp(1.6rem, 3.5vw, 2.2rem); font-weight: 700; letter-spacing: -0.01em; }
+h3 { font-size: 1.15rem; font-weight: 700; }
+p { margin: 0; }
+a { color: var(--leaf); }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--leaf); outline-offset: 3px; border-radius: 4px; }
+.eyebrow { font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.num { font-variant-numeric: tabular-nums; }
+
+/* hero */
+.hero { padding-block: 56px 40px; display: grid; gap: 20px; border-bottom: 1px solid var(--rule); }
+.hero h1 { font-size: clamp(2.6rem, 8vw, 5rem); font-weight: 800; letter-spacing: -0.03em; }
+.hero h1 em { font-style: normal; color: var(--leaf); }
+.hero .lede { font-size: 1.2rem; max-width: 60ch; color: var(--ink); }
+.hero .meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.9rem; padding-top: 4px; }
+nav.toc a { text-decoration: none; border-bottom: 1px solid var(--rule); color: var(--ink); }
+nav.toc a:hover { border-color: var(--leaf); }
+
+section { padding-block: 48px 8px; display: grid; gap: 20px; }
+.sec-head { display: grid; gap: 8px; }
+
+/* specimen tags */
+.plants { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.tag { background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 20px; display: grid; gap: 12px; align-content: start; min-width: 0; position: relative; }
+.tag::before { content: ""; position: absolute; top: 14px; right: 14px; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--rule); }
+.tag .who { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.tag .name { font-family: var(--display); font-size: 1.7rem; font-weight: 800; letter-spacing: -0.02em; }
+.tag .latin { font-style: italic; color: var(--muted); font-size: 0.92rem; }
+.tag dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; font-size: 0.92rem; }
+.tag dt { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-top: 3px; }
+.tag dd { margin: 0; min-width: 0; }
+.pill { display: inline-block; font-family: var(--mono); font-size: 0.72rem; padding: 2px 8px; border-radius: 99px; background: var(--leaf-soft); color: var(--leaf); }
+.pill.dew { background: var(--dew-soft); color: var(--dew); }
+
+/* diagram */
+.figure { background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; overflow-x: auto; }
+.figure svg { display: block; width: 100%; min-width: 640px; height: auto; }
+.figure figcaption { font-size: 0.85rem; color: var(--muted); margin-top: 8px; }
+svg .node { fill: var(--bg); stroke: var(--rule); stroke-width: 1.5; }
+svg .node.core { fill: var(--leaf-soft); stroke: var(--leaf); }
+svg .node.human { fill: var(--dew-soft); stroke: var(--dew); }
+svg .t { fill: var(--ink); font-family: var(--body); font-size: 14px; }
+svg .t.b { font-family: var(--display); font-weight: 700; font-size: 17px; }
+svg .t.s { fill: var(--muted); font-size: 12px; }
+svg .edge { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+svg .edge.intel { stroke: var(--leaf); stroke-dasharray: 5 4; }
+svg .head { fill: var(--muted); }
+svg .head.intel { fill: var(--leaf); }
+
+/* two-col list */
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px 32px; }
+.cols > div { display: grid; gap: 6px; min-width: 0; }
+.cols h3 { font-size: 1rem; }
+.cols p { color: var(--ink); font-size: 0.95rem; }
+
+/* rounds log */
+.log { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; counter-reset: r; border-top: 1px solid var(--rule); }
+.log li { display: grid; grid-template-columns: 3.2rem 1fr; gap: 4px 16px; padding-block: 16px; border-bottom: 1px solid var(--rule); counter-increment: r; }
+.log li::before { content: counter(r, decimal-leading-zero); font-family: var(--mono); color: var(--muted); font-size: 0.85rem; padding-top: 3px; }
+.log .body { display: grid; gap: 4px; min-width: 0; }
+.log .title { font-weight: 600; }
+.log .res { font-size: 0.93rem; color: var(--ink); }
+.log .res b { font-weight: 600; }
+.log .who-tag { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* charts */
+.charts { display: grid; gap: 20px; }
+.chart { background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 20px; display: grid; gap: 14px; min-width: 0; }
+.chart .ct { display: grid; gap: 2px; }
+.chart .note { font-size: 0.85rem; color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.82rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+.group { display: grid; gap: 6px; }
+.group .gl { font-size: 0.88rem; font-weight: 600; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) 3.6rem; align-items: center; gap: 10px; }
+.track { height: 14px; background: var(--bar-track); border-radius: 2px; position: relative; overflow: hidden; }
+.fill { position: absolute; inset: 0 auto 0 0; border-radius: 2px; }
+.row .v { font-family: var(--mono); font-size: 0.8rem; text-align: right; font-variant-numeric: tabular-nums; }
+.c-base { background: var(--muted); }
+.c-mid { background: var(--amber); }
+.c-best { background: var(--leaf); }
+.c-bad { background: var(--dew); }
+.scale { display: grid; grid-template-columns: minmax(0, 1fr) 3.6rem; gap: 10px; font-family: var(--mono); font-size: 0.7rem; color: var(--muted); }
+.scale div:first-child { display: flex; justify-content: space-between; }
+
+/* tables */
+.tbl { overflow-x: auto; background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; }
+table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 0.92rem; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+tr:last-child td { border-bottom: 0; }
+td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.good { color: var(--leaf); font-weight: 600; }
+td.bad { color: var(--dew); font-weight: 600; }
+
+/* callouts */
+.callout { border-left: 3px solid var(--dew); background: var(--dew-soft); padding: 16px 18px; border-radius: 0 6px 6px 0; display: grid; gap: 8px; }
+.callout.leaf { border-color: var(--leaf); background: var(--leaf-soft); }
+.callout p { font-size: 0.97rem; }
+
+ul.plain { margin: 0; padding-left: 1.1rem; display: grid; gap: 8px; }
+ul.plain li { padding-left: 2px; }
+code { font-family: var(--mono); font-size: 0.86em; background: var(--bar-track); padding: 1px 5px; border-radius: 3px; word-break: break-word; }
+.files { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 24px; font-size: 0.9rem; }
+.files div { display: grid; gap: 2px; min-width: 0; }
+.files code { justify-self: start; }
+footer { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--rule); font-size: 0.85rem; color: var(--muted); }
+
+@media (max-width: 520px) {
+  .log li { grid-template-columns: 2.2rem 1fr; gap: 4px 10px; }
+  .tag dl { grid-template-columns: 1fr; gap: 2px; }
+  .tag dt { padding-top: 6px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fill { transition: width 0.6s ease; }
+}
+</style>
+
+<div class="wrap">
+
+<header class="hero">
+  <div class="eyebrow">Defensive deception against AI attack swarms · concept and simulations</div>
+  <h1>The <em>Darwin</em> System</h1>
+  <p class="lede">Three traps modeled on carnivorous plants, wired together so each one makes the others stronger. They lure automated attackers in, keep them busy with convincing fakes, and warn people early.</p>
+  <div class="meta"><span>Concept: OJ · GretelMK4</span><span>Simulations: built and run with Claude</span><span class="num">14 rounds of testing · November 2026</span></div>
+  <nav class="toc" aria-label="Sections">
+    <a href="#plants">The three plants</a><a href="#how">How they connect</a><a href="#rounds">How it evolved</a>
+    <a href="#results">Results</a><a href="#infra">Critical infrastructure</a><a href="#lessons">Lessons</a>
+    <a href="#limits">Limits</a><a href="#next">Next steps</a>
+  </nav>
+</header>
+
+<section id="idea">
+  <div class="sec-head prose">
+    <div class="eyebrow">The idea</div>
+    <h2>Trap the attacker instead of fighting back</h2>
+  </div>
+  <div class="prose" style="display:grid;gap:14px">
+    <p>Hacking an attacker back is illegal for private defenders and risks hitting innocent machines that attackers hijack. Darwin never touches the attacker's systems. Everything happens on infrastructure you own: you make your own network expensive, confusing and dangerous to attack.</p>
+    <p>The design rests on one observation. Some things on a network have no legitimate users at all: a hidden app, a decoy server, a fake controller. Anything that touches them is almost certainly an attacker. That gives an alarm with very few false positives, and it gives attackers something worth wasting their time on.</p>
+  </div>
+</section>
+
+<section id="plants">
+  <div class="sec-head">
+    <div class="eyebrow">The three plants</div>
+    <h2>Each trap borrows a real plant's strategy</h2>
+  </div>
+  <div class="plants">
+    <article class="tag">
+      <div class="who"><span class="name">Judith</span><span class="pill">pitfall trap</span></div>
+      <div class="latin">after Sarracenia, the pitcher plant</div>
+      <dl>
+        <dt>Lives</dt><dd>Inside a real website or network you protect</dd>
+        <dt>Lures</dt><dd>Sweet rim: leaked-looking configs, hidden folders, fake keys that "work"</dd>
+        <dt>Traps</dt><dd>Endless generated mazes. Past a set depth the trap seals one way: even the real homepage turns fake for that bot</dd>
+        <dt>Defends</dt><dd>Several pitchers per site. Lockdown on alarm; hidden product links only bots follow; a shadow site feeding sealed bots plausible fakes</dd>
+      </dl>
+    </article>
+    <article class="tag">
+      <div class="who"><span class="name">Venus</span><span class="pill dew">snap trap</span></div>
+      <div class="latin">after Dionaea muscipula, the Venus flytrap</div>
+      <dl>
+        <dt>Lives</dt><dd>On phones and workstations</dd>
+        <dt>Lures</dt><dd>Decoy files and logins, plus hidden decoy apps that look alive with fake updates and activity</dd>
+        <dt>Traps</dt><dd>Trigger hairs: touching a decoy pauses the suspect app; repeated touches or an unusual upload cut the device's internet</dd>
+        <dt>Defends</dt><dd>Phones share what they catch, so malware stopped on one phone is blocked on all the others</dd>
+      </dl>
+    </article>
+    <article class="tag">
+      <div class="who"><span class="name">Hercules</span><span class="pill">flypaper trap</span></div>
+      <div class="latin">after Drosera, the sundew</div>
+      <dl>
+        <dt>Lives</dt><dd>A farm of fake servers with no real purpose, on the internet and inside networks</dd>
+        <dt>Lures</dt><dd>Nothing special. Aimless swarms sweep everything, so they land on it anyway</dd>
+        <dt>Traps</dt><dd>Sticky from the first request: fast, endless, fake. No legitimate visitor ever arrives</dd>
+        <dt>Defends</dt><dd>Digestion as intelligence: every visitor and every fake key it hands out is shared with Judith and Venus</dd>
+      </dl>
+    </article>
+  </div>
+</section>
+
+<section id="how">
+  <div class="sec-head">
+    <div class="eyebrow">How they connect</div>
+    <h2>The ecosystem is the point</h2>
+    <p class="prose">In testing, each plant alone was beatable, and once Hercules made Judith worse by distracting the attackers that would have tripped her alarm. Connected, they cover each other's blind spots.</p>
+  </div>
+  <figure class="figure" style="margin:0">
+    <svg viewBox="0 0 760 330" role="img" aria-label="Diagram: Hercules, Judith and Venus share intelligence through a common channel and alert the human team.">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+        <marker id="ahi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head intel" d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+      <rect class="node" x="20" y="30" width="200" height="84" rx="6"/>
+      <text class="t b" x="40" y="62">Hercules</text>
+      <text class="t s" x="40" y="84">fake servers, sticky at once</text>
+      <text class="t s" x="40" y="102">sees swarms first</text>
+
+      <rect class="node" x="540" y="30" width="200" height="84" rx="6"/>
+      <text class="t b" x="560" y="62">Judith</text>
+      <text class="t s" x="560" y="84">pitchers inside real sites</text>
+      <text class="t s" x="560" y="102">seal, shadow, lockdown</text>
+
+      <rect class="node" x="20" y="216" width="200" height="84" rx="6"/>
+      <text class="t b" x="40" y="248">Venus</text>
+      <text class="t s" x="40" y="270">flytraps on devices</text>
+      <text class="t s" x="40" y="288">pause, isolate, share</text>
+
+      <rect class="node core" x="290" y="120" width="180" height="90" rx="6"/>
+      <text class="t b" x="312" y="152">Shared intel</text>
+      <text class="t s" x="312" y="174">identities · fake keys</text>
+      <text class="t s" x="312" y="192">surges · malware fingerprints</text>
+
+      <rect class="node human" x="540" y="216" width="200" height="84" rx="6"/>
+      <text class="t b" x="560" y="248">Human team</text>
+      <text class="t s" x="560" y="270">high-confidence alerts</text>
+      <text class="t s" x="560" y="288">decide, contain, recover</text>
+
+      <path class="edge intel" d="M220 80 C 270 90, 300 110, 320 120" marker-end="url(#ahi)"/>
+      <path class="edge intel" d="M120 216 C 150 190, 260 180, 290 172" marker-end="url(#ahi)"/>
+      <path class="edge intel" d="M450 120 C 480 100, 510 85, 540 78" marker-end="url(#ahi)"/>
+      <path class="edge intel" d="M540 92 C 500 105, 480 125, 470 140" marker-end="url(#ahi)"/>
+      <path class="edge" d="M640 114 L 640 214" marker-end="url(#ah)"/>
+      <path class="edge" d="M470 190 C 500 210, 520 230, 540 245" marker-end="url(#ah)"/>
+      <path class="edge" d="M220 268 C 380 300, 480 290, 538 270" marker-end="url(#ah)"/>
+    </svg>
+    <figcaption>Dashed: intelligence shared between plants. Solid: alerts to people. Hercules's sightings and fake keys arm Judith; Venus devices share what they catch with each other.</figcaption>
+  </figure>
+  <div class="cols">
+    <div><h3>Lure</h3><p>Nectar a bot can't resist: leaked-looking configs, juicy names in public certificate logs, hidden decoy apps, decoy controllers listed inside real engineering documents.</p></div>
+    <div><h3>Hold</h3><p>Endless fakes generated on the fly. Cheap for the defender, expensive for an attacker that pays for every step it takes.</p></div>
+    <div><h3>Poison</h3><p>Sealed bots get believable fake data, so even a successful theft is mostly worthless. In one test, 99.8% of what a swarm took home was fake.</p></div>
+    <div><h3>Warn</h3><p>Every touch of a decoy is a near-certain signal. Signals from different plants combine into a lockdown and an alert people can act on quickly.</p></div>
+  </div>
+</section>
+
+<section id="rounds">
+  <div class="sec-head">
+    <div class="eyebrow">How it evolved</div>
+    <h2>Fourteen rounds of attack and fix</h2>
+    <p class="prose">Each round was a simulation on local test servers. Most rounds ended with the attackers finding a weakness and the next round fixing it.</p>
+  </div>
+  <ol class="log">
+    <li><div class="body"><span class="title">Tarpit maze</span><span class="who-tag">Judith, first version</span><span class="res">A greedy bot spent 99% of its requests inside and dug 69 folders deep. A loop-detecting bot escaped in 4.8 s until folder names were generated from word combinations; then it stayed trapped for the full test.</span></div></li>
+    <li><div class="body"><span class="title">Fake API layer</span><span class="who-tag">Judith</span><span class="res">A bot that tests stolen keys escaped instantly when 3 keys failed. With a fake API that accepts the trap's own keys, it stayed the full 25 s, "stole" 1,860 fake records and climbed 22 levels of fake privilege.</span></div></li>
+    <li><div class="body"><span class="title">One-way seal</span><span class="who-tag">Judith</span><span class="res">Past a set depth, even the real homepage turns fake for that bot. A bot that fled after being sealed saw trap pages on 6 of its 9 "escape" pages.</span></div></li>
+    <li><div class="body"><span class="title">Nectar on a fake internet</span><span class="who-tag">Judith + lures</span><span class="res">40 aimless bots, 61 sites. With a juicy name and a leaked config, the share of bots going to the trap first rose from <b>5% to 81%</b>, and the real sites took 27% fewer attack requests.</span></div></li>
+    <li><div class="body"><span class="title">Ant pheromone scouts</span><span class="who-tag">Judith</span><span class="res">Letting every 4th bot leave with "gold" made the swarm recruit itself: 37 of 60 bots followed the trail in. A cautious swarm that avoided a plain trap (1 recruit) sent 16.</span></div></li>
+    <li><div class="body"><span class="title">Catch and release</span><span class="who-tag">Judith</span><span class="res">Releasing trapped bots after 8 s burned 40% more attacker time against a cautious swarm. Releasing after 4 s backfired, and releasing at all hurt against naive swarms.</span></div></li>
+    <li><div class="body"><span class="title">Multi-pitcher lockdown</span><span class="who-tag">Judith</span><span class="res">150 bots against a 3,000-item catalog. A standard rate limit lost everything. Five pitchers plus lockdown and the shadow shield cut real theft to <b>25%</b>, with the swarm's haul 75% fake.</span></div></li>
+    <li><div class="body"><span class="title">Phone flytrap</span><span class="who-tag">Venus</span><span class="res">One decoy touch (with the phone's own scanner trusted) cut sensitive leaks from about 11 of 15 files to 1, and caught a slow agent that a 3-touches-in-60-s rule missed entirely.</span></div></li>
+    <li><div class="body"><span class="title">Hidden decoy apps and kill switch</span><span class="who-tag">Venus</span><span class="res">The only defense that caught deep spyware: leaks fell from 21 of 21 to 5. "Alive" decoys made the kill switch fire 89% of the time versus 52%. No false kill in 2,000 normal weeks.</span></div></li>
+    <li><div class="body"><span class="title">Full ecosystem</span><span class="who-tag">all three + sharing</span><span class="res">300 smart bots. Sharing cut phone leaks from 17% to <b>1.6%</b>. Hercules sites built to look different held 11% of the swarm's effort instead of 0.6%.</span></div></li>
+    <li><div class="body"><span class="title">A smarter swarm breaks it</span><span class="who-tag">stress test</span><span class="res">600 bots that never touch pitchers on their target and test stolen keys across sites took <b>100%</b> of the catalog and exposed every Hercules site.</span></div></li>
+    <li><div class="body"><span class="title">Defense v2</span><span class="who-tag">fixes</span><span class="res">Hidden honey links, a surge alarm, separate key registries per Hercules site and malware fingerprint sharing brought theft back down to <b>23%</b>. A browser-like swarm still took 45%.</span></div></li>
+    <li><div class="body"><span class="title">Defense v3</span><span class="who-tag">fixes</span><span class="res">An instant traffic tripwire, an enumeration detector, an entry puzzle and a busy cap took every swarm under 10%, including one that knew every threshold.</span></div></li>
+    <li><div class="body"><span class="title">Critical infrastructure</span><span class="who-tag">abstract model</span><span class="res">A utility-style network with a control system. Darwin stopped the fast and patient attackers almost every time and warned people hours ahead; careful attackers with real logins got through about a third to half the time.</span></div></li>
+  </ol>
+</section>
+
+<section id="results">
+  <div class="sec-head">
+    <div class="eyebrow">Results</div>
+    <h2>The numbers that mattered</h2>
+    <p class="prose">Averages of the simulation runs described above. Bars are drawn to a 0–100% scale.</p>
+  </div>
+  <div class="charts" id="charts"></div>
+</section>
+
+<section id="infra">
+  <div class="sec-head">
+    <div class="eyebrow">Critical infrastructure</div>
+    <h2>Could it protect something important?</h2>
+    <p class="prose">An abstract model of a utility-style network: corporate IT, one guarded door into the control network, and 30 controllers running physical equipment. Conventional security was always on. The question was whether Darwin stops an attacker, or at least warns people in time. 1,000 simulated attacks per case.</p>
+  </div>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Attacker</th><th>Conventional only: reached a controller</th><th>Darwin (dense)</th><th>Warning to humans when stopped</th></tr></thead>
+      <tbody>
+        <tr><td>Blitz: fast, noisy</td><td class="n bad">100%</td><td class="n good">0%</td><td>90% flagged surveying the sector before breaking in; alarm within ~2 min of entry</td></tr>
+        <tr><td>Stealth: patient, mostly passive</td><td class="n bad">96%</td><td class="n good">1.7%</td><td>First alert ~80 min after entry; such attacks needed ~4 h to reach a controller</td></tr>
+        <tr><td>Deception-aware: avoids bait</td><td class="n bad">99%</td><td class="n">46%</td><td>Alert ~2.5 h in, against ~4.5 h needed</td></tr>
+        <tr><td>Stolen engineer logins</td><td class="n bad">100%</td><td class="n">37%</td><td>Alert ~26 min in, against ~54 min needed</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout">
+    <p><b>The limit, stated plainly.</b> When a careful attacker did get through, humans were warned beforehand only about 3% of the time. An attacker holding real logins that ignores bait leaves almost nothing for deception to catch. In a real facility Darwin belongs beside controls that don't depend on deception, such as logins that can't be phished and two-person approval for commands to equipment.</p>
+  </div>
+  <p class="prose" style="font-size:0.95rem;color:var(--muted)">Cost to normal operations: about 2 false alerts a week, mostly people opening a decoy file by accident, and roughly one false lockdown every 7 months, delaying engineers about 15 minutes.</p>
+</section>
+
+<section id="lessons">
+  <div class="sec-head">
+    <div class="eyebrow">Lessons</div>
+    <h2>What held up in every round</h2>
+  </div>
+  <div class="cols">
+    <div><h3>Zero-user decoys are near-perfect alarms</h3><p>Hidden apps, decoy servers and decoy controllers almost never fired on innocent people. Normal visitors saw zero fake pages across every web test.</p></div>
+    <div><h3>Connection beats any single trap</h3><p>Sharing intelligence was the largest single improvement. Unconnected, one plant can even weaken another.</p></div>
+    <div><h3>Every single trigger is a weak point</h3><p>Smart swarms beat each alarm by avoiding its one trigger. What worked was putting traps where the attacker must step: in the scraper's own path, in traffic volume, in the documents it reads.</p></div>
+    <div><h3>Context changes the rules</h3><p>On a website, waiting for two different signals avoids false alarms. Inside a control network, a single touch of a decoy should lock the door.</p></div>
+    <div><h3>The real win is time</h3><p>Against the smartest attackers, Darwin didn't build a wall. It turned attacks that took under a second into ones that took most of an hour, and gave people warning during that time.</p></div>
+    <div><h3>Fakes must cost real users nothing</h3><p>One rule (a fixed product budget for new visitors) fed real shoppers fake pages during an attack and barely slowed the swarm. It was removed. Every rule was tested against simulated people too.</p></div>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="sec-head">
+    <div class="eyebrow">Limits</div>
+    <h2>How far to trust these results</h2>
+  </div>
+  <ul class="plain prose">
+    <li><b>Both sides were written by the same team.</b> The attackers could only be as clever as we thought to make them. Each new attacker tactic broke something, so a real adversary will find cracks these tests never imagined.</li>
+    <li><b>Time was compressed.</b> Real internet sweeps take hours or days. That likely understates Hercules's early-warning value, and it caps how much a patient attacker could steal within a 60-second test.</li>
+    <li><b>Thresholds were tuned to simulated traffic.</b> A real shop or plant would set them from its own baseline, and a real flash sale could trip the traffic tripwire.</li>
+    <li><b>Few repeats.</b> Most web results average two runs; the phone and infrastructure models ran 500–1,000 trials each.</li>
+    <li><b>The building blocks are not new.</b> Honeytokens, tarpits, decoy networks and crawler mazes exist today. The ecosystem framing and several mechanisms here (scout release, one-way seal, the shadow shield, hidden decoy apps on phones) are not something we've seen packaged together, though no literature search has been done.</li>
+    <li><b>Rules that stay fixed:</b> decoys use fictional brands only, everything runs on infrastructure the defender owns, nothing ever attacks back, and testing on real critical systems requires an authorized red-team exercise.</li>
+  </ul>
+</section>
+
+<section id="next">
+  <div class="sec-head">
+    <div class="eyebrow">Next steps</div>
+    <h2>From simulation to evidence</h2>
+  </div>
+  <div class="cols">
+    <div><h3>Break the self-grading</h3><p>Have an attacker built by someone who hasn't seen the defense, such as a separate AI agent working blind.</p></div>
+    <div><h3>Meet real bots</h3><p>Run Hercules and Judith on a cheap, isolated cloud server for a few weeks and record what actually shows up.</p></div>
+    <div><h3>Prototype Venus</h3><p>One hidden decoy app plus an on-device VPN watcher on Android, to learn what the platform really allows.</p></div>
+    <div><h3>Watch the long game</h3><p>Detection over hours: spotting a "crowd" that is systematically working through an entire catalog or network.</p></div>
+  </div>
+</section>
+
+<section id="files">
+  <div class="sec-head">
+    <div class="eyebrow">Code</div>
+    <h2>The simulation files</h2>
+    <p class="prose">All Python, standard library only. Paths are from the repository root; run modules with <code>python -m</code>.</p>
+  </div>
+  <div class="files">
+    <div><code>darwin/judith/pitcher.py</code><span>Judith's original pitcher: maze, fake API, seal, scouts, catch and release, dashboard</span></div>
+    <div><code>darwin/judith/shop.py</code><span>A real shop with five pitchers, lockdown, shadow site, hidden links and crowd tripwires</span></div>
+    <div><code>darwin/hercules/honeyfarm.py</code><span>The sundew honeyfarm, uniform or diverse</span></div>
+    <div><code>simulations/ecosystem/full.py</code><span>The whole ecosystem against swarms v1–v4x</span></div>
+    <div><code>darwin/venus/decoy_apps_model.py</code><span>Venus on phones: hidden decoy apps, two-stage kill switch</span></div>
+    <div><code>simulations/models/infrastructure.py</code><span>The critical-infrastructure model</span></div>
+  </div>
+</section>
+
+<footer>This page is the original design write-up from November 21, 2026 and reports the numbers from those sessions. For results re-run on the released code, see FINDINGS.md. The Darwin System is a defensive research concept. All tests ran on local simulated servers; no real systems were attacked. Every attacker behavior and number in the models is an assumption chosen to test the design's logic.</footer>
+</div>
+
+<script>
+(function () {
+  var charts = [
+    { title: "Shop catalog stolen by a smart 600-bot swarm", note: "Lower is better. Defense v3 against four swarm types.",
+      legend: [["c-bad", "Old defenses"], ["c-best", "Defense v3"]],
+      groups: [
+        ["Browser-like swarm", [["c-bad", 100], ["c-best", 0]]],
+        ["Blitz swarm", [["c-bad", 100], ["c-best", 0.3]]],
+        ["Stealth swarm", [["c-bad", 100], ["c-best", 5.6]]],
+        ["Swarm that knows every threshold", [["c-bad", 100], ["c-best", 5.3]]]
+      ] },
+    { title: "Phone data leaked, 200 phones", note: "Lower is better. Round 10, 300-bot swarm.",
+      legend: [["c-base", "No defense"], ["c-mid", "Venus, no sharing"], ["c-best", "Venus with sharing"]],
+      groups: [["Share of sensitive data leaked", [["c-base", 100], ["c-mid", 16.8], ["c-best", 1.6]]]] },
+    { title: "Sensitive items leaked on one phone", note: "Lower is better. Round 9, of 21 items, shown as a percentage.",
+      legend: [["c-base", "No trap"], ["c-best", "Two-stage flytrap + hidden decoy apps"]],
+      groups: [
+        ["Rogue AI app", [["c-base", 57], ["c-best", 9.5]]],
+        ["Hijacked AI controlling the screen", [["c-base", 35], ["c-best", 2.9]]],
+        ["Deep spyware", [["c-base", 100], ["c-best", 25]]],
+        ["Bulk copier", [["c-base", 71], ["c-best", 1.4]]],
+        ["Targeted banking trojan", [["c-base", 19], ["c-best", 19]]]
+      ] },
+    { title: "Attacks that reached a real controller", note: "Lower is better. Critical-infrastructure model, 1,000 attacks each.",
+      legend: [["c-base", "Conventional security"], ["c-mid", "Darwin"], ["c-best", "Darwin, dense decoys + instant lockdown"]],
+      groups: [
+        ["Blitz", [["c-base", 100], ["c-mid", 0], ["c-best", 0]]],
+        ["Stealth", [["c-base", 96.1], ["c-mid", 4.9], ["c-best", 1.7]]],
+        ["Deception-aware", [["c-base", 99.4], ["c-mid", 52.1], ["c-best", 46.1]]],
+        ["Stolen engineer logins", [["c-base", 100], ["c-mid", 61.5], ["c-best", 36.6]]]
+      ] }
+  ];
+  var root = document.getElementById("charts");
+  function fmt(v) { return (v === 0 ? "0" : (v < 10 && v % 1 ? v.toFixed(1) : String(Math.round(v * 10) / 10))) + "%"; }
+  charts.forEach(function (c) {
+    var el = document.createElement("div");
+    el.className = "chart";
+    var h = '<div class="ct"><h3>' + c.title + '</h3><p class="note">' + c.note + '</p></div><div class="legend">' +
+      c.legend.map(function (l) { return '<span><i class="sw ' + l[0] + '"></i>' + l[1] + '</span>'; }).join("") + '</div>';
+    c.groups.forEach(function (g) {
+      h += '<div class="group"><div class="gl">' + g[0] + '</div>';
+      g[1].forEach(function (b, i) {
+        var label = c.legend[i] ? c.legend[i][1] : "";
+        h += '<div class="row" aria-label="' + label + ': ' + fmt(b[1]) + '"><div class="track"><div class="fill ' + b[0] +
+          '" style="width:' + Math.max(b[1], b[1] > 0 ? 0.6 : 0) + '%"></div></div><div class="v">' + fmt(b[1]) + '</div></div>';
+      });
+      h += '</div>';
+    });
+    h += '<div class="scale" aria-hidden="true"><div><span>0</span><span>25</span><span>50</span><span>75</span><span>100%</span></div><div></div></div>';
+    el.innerHTML = h;
+    root.appendChild(el);
+  });
+})();
+</script>

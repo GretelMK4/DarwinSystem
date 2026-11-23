@@ -1,0 +1,18 @@
+[project]
+name = "darwin-system"
+version = "0.1.0"
+description = "Defensive deception traps against automated AI attack swarms. Research prototype."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+authors = [{ name = "GretelMK4" }]
+dependencies = []          # standard library only
+
+[project.optional-dependencies]
+dev = ["pytest", "pyflakes"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["darwin*", "simulations*"]
