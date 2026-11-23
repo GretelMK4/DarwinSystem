@@ -6,10 +6,11 @@ readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 authors = [{ name = "GretelMK4" }]
-dependencies = []          # standard library only
+dependencies = []          # standard library only; see the "phase3" extra
 
 [project.optional-dependencies]
-dev = ["pytest", "pyflakes"]
+dev = ["pytest", "pyflakes", "cryptography"]
+phase3 = ["cryptography"]   # darwin/comms.py: Ed25519 signatures
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
