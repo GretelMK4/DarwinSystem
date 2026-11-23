@@ -8,7 +8,7 @@ convincing fakes, and warn people early.
 > **Research prototype.** Tested only in simulations, including live red-team attacks
 > by Claude Opus 5.5 (medium effort) and Claude Fable 5.2 agents. Not yet tested on production systems.
 
-A project of **GretelMK4**. Apache License 2.0. Python standard library only.
+A project of **GretelMK4**. Apache License 2.0. Python standard library only, except the phase 3 prototype, which needs `cryptography`.
 
 ## The idea
 
@@ -56,6 +56,7 @@ Be clear about this before you rely on anything here.
 | Hercules (`darwin/hercules/honeyfarm.py`) | Working local library: a farm of fake sites on localhost ports |
 | The Spider (`darwin/judith/spider.py`) | Working first version of the phase 2 watcher, on by default: it flags for people and Judith silently seals the flagged address (`SPIDER=alert` to flag only): per-address ledger with owner-set rules, fingerprints of Darwin's own files |
 | Signed intel (`darwin/intel.py`) | Working: HMAC-SHA256 envelopes with replay protection |
+| Phase 3 channel (`darwin/comms.py`) | **Prototype library, not wired in.** Per-Hercules keys, corroboration, missing-message detection; tested in simulation only |
 | Crawler verification (`darwin/crawlers.py`) | Working, but tested only with fake DNS, never against live search-engine traffic |
 | **Venus** (`darwin/venus/`) | **Model only.** Two probability simulations of a phone. No app or on-device code exists |
 | Long-tail coverage detector, visible decoy products, behavioural linking, tail cap | **Model only** (`simulations/attackers/patient_swarm.py`). Not implemented in the shop |
@@ -86,7 +87,7 @@ SWARM=v4b python -m simulations.ecosystem.full eco_v3
 Tests:
 
 ```
-python -m pip install pytest
+python -m pip install pytest cryptography
 python -m pytest -q
 ```
 
@@ -101,7 +102,8 @@ darwin/
   judith/      pitcher.py, shop.py, spider.py, dashboard.html
   hercules/    honeyfarm.py
   venus/       flytrap_model.py, decoy_apps_model.py   (models only)
-  intel.py     signed messages between the plants
+  intel.py     signed messages between the plants (v0.1 channel, in use)
+  comms.py     phase 3 channel (prototype, not wired in; needs `cryptography`)
   crawlers.py  verified search-crawler protection
 simulations/
   attackers/   crawler.py, swarm.py, ant_scouts.py, patient_swarm.py
@@ -200,7 +202,8 @@ the design sessions; its raw files are not in this repository yet.
 |---|---|
 | **1. The three plants** | **Released.** Judith and Hercules as working local prototypes, Venus as a model. |
 | **2. The Spider** | **Released, first version.** Built, on by default, and it caught three patient AI agents in a live test. |
-| **3. Protected communication** | **Next.** Basic signing between Hercules and Judith is already in; the rest is not started. |
+| **3. Protected communication** | **In progress.** A prototype channel and an attack simulation are in the repo ([docs/PHASE3.md](docs/PHASE3.md)); it is not yet wired into the servers. |
+| **4. Venus** | **Planned.** A real Venus on a phone, and a network of them. |
 
 **Phase 1: the three plants.** Design complete and in this release.
 
@@ -218,9 +221,15 @@ What phase 2 still owes before it can be called finished:
 replayed, read or silenced: per-plant keys, key rotation, encrypted transport, and a
 Spider that cannot be switched off by whoever it is watching.
 
+**Phase 4: Venus.** Today Venus is a model. Phase 4 is a first Venus on a real phone
+(decoy files, a hidden decoy app, decoy aging), and then a network of them: phones that
+pass signed Hercules warnings to each other and to Judith, so a warning cannot be
+blocked, and that report what their own decoys caught, so Judith has witnesses that do
+not depend on any Hercules. The open problems are fake phones flooding the network,
+keeping phone reports anonymous, and how phones reach each other at all.
+
 Also needed before anyone should depend on this: independent red teams, a few weeks of
-Judith and Hercules on an isolated server to see what real bots do, and a first Venus
-prototype on a real phone.
+Judith and Hercules on an isolated server to see what real bots do.
 
 ## Responsible use
 

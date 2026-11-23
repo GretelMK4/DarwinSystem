@@ -21,7 +21,8 @@ Contributions that break it will not be merged.
 
 ## Ground rules for code
 
-- **Standard library only.** No third-party runtime dependencies.
+- **Standard library only**, with one exception: `darwin/comms.py` uses the
+  `cryptography` package for public-key signatures, which Python cannot do alone.
 - **Attacker models stay on localhost** and stay abstract: behaviour, timing and
   decisions, with no real exploits, payloads or evasion code for real products.
   Do not submit scraping or attack tools.
@@ -37,7 +38,7 @@ Contributions that break it will not be merged.
 ```
 git clone https://github.com/GretelMK4/DarwinSystem
 cd DarwinSystem
-python -m pip install pytest pyflakes
+python -m pip install pytest pyflakes cryptography
 python -m pytest -q
 python -m pyflakes darwin simulations tests
 ```

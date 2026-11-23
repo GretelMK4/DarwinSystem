@@ -322,6 +322,24 @@ none of it could be re-run for this release:
   so that using one confirms an attack. The released shop already seals any visitor who
   presents a key that Hercules reported (`intel_token`); the fuller idea is not built.
 
+## Phase 3: attacking the communication between the plants (simulation)
+
+`python -m simulations.models.comms`. Full results and the design are in
+[PHASE3.md](PHASE3.md). The prototype channel is not wired into the servers yet.
+
+- **One stolen key** did the most damage it could against the released v0.1 channel: a
+  false lockdown and 500 innocent shoppers sealed permanently. Against the prototype,
+  which needs two witnesses before it seals anyone, it did nothing.
+- Blocking, lying, replaying and telling two receivers different stories were all
+  rejected or flagged in every run.
+- **Two stolen keys beat the default settings** (false lockdown, 200 shoppers sealed for
+  an hour). Quorums high enough to stop that miss a real sweep that hits only two
+  Hercules sites.
+- The two-witness default costs something: a lone attacker seen by one Hercules is only
+  watched until a second Hercules, or Judith herself, sees him too.
+- These are counts from a simulated network with real signatures, not estimates. They
+  say the rules do what they were written to do. They say nothing about a real network.
+
 ## 4. What changed for this release
 
 Done:
