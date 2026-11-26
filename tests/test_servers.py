@@ -293,3 +293,26 @@ def test_newcomer_must_solve_the_puzzle_during_lockdown(shop_url, monkeypatch):
     assert get(f"{shop_url}/shop/item/11", ua, {shop.CHALLENGE_HEADER: answer}) == (200, shop.item_page(11))
     time.sleep(1.1)                                                           # probation pace rule: 2 pages within 1 s seals
     assert get(f"{shop_url}/shop/item/12", ua) == (200, shop.item_page(12))  # solved once, not asked again
+
+
+def test_fleet_guard_serves_the_shadow_to_a_guarded_request(shop_url):
+    class Guarded:                                           # a Spider whose fleet guard covers product 7
+        def __init__(self):
+            self.noted = []
+
+        def observe(self, *a):
+            pass
+
+        def guarded(self, address, product, now=None):
+            return product == 7
+
+        def note_shadow(self, product, now=None):
+            self.noted.append(product)
+    old, shop.SPIDER = shop.SPIDER, Guarded()
+    try:
+        ua = "Mozilla/5.0 (fleet-guard)"
+        assert get(f"{shop_url}/shop/item/7", ua)[1] == shop.item_page(7, fake=True)
+        assert get(f"{shop_url}/shop/item/8", ua)[1] == shop.item_page(8)
+        assert shop.SPIDER.noted == [7]
+    finally:
+        shop.SPIDER = old
