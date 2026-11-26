@@ -74,3 +74,97 @@ def test_changed_component_is_flagged(tmp_path):
     assert "component_changed" in (tmp_path / "flags.jsonl").read_text()
     f.unlink()
     assert s.inspect() == []                                              # already flagged; not raised twice
+
+
+# ---------------- fleet rule (nightly 2026-11-25 evening) ----------------
+
+def _shoppers(s, t0, t1, rng, popular=50):
+    t = t0
+    while t < t1:
+        t += rng.expovariate(1 / 20)
+        s.observe(f"home-{rng.randrange(100000)}", "Mozilla/5.0", 1 + int(rng.paretovariate(1.2)) % popular, t)
+    return t
+
+
+def test_fleet_rule_catches_a_spread_out_swarm_and_guards_only_cold_tail_requests():
+    import random
+    rng = random.Random(1)
+    s = Spider(policy(bucket=600, fleet_warmup=3, fleet_floor=20, period=60, window=1200))
+    t = 0.0
+    for k in range(6):                                      # learn a quiet baseline
+        t = _shoppers(s, t, t + 600, rng)
+        assert s.inspect(now=t) == []
+    for i in range(300):                                    # 300 addresses x 1 rare product each
+        t += 1.5
+        s.observe(f"proxy-{i}", "Mozilla/5.0", 1000 + i, t)
+    flags = s.inspect(now=t)
+    assert rules(flags) == ["fleet_tail"]
+    assert s.guarded("proxy-new", 5000, now=t + 1)          # cold address, never-viewed product
+    assert not s.guarded("proxy-new", 2, now=t + 1)         # a popular product is never guarded
+    assert not s.guarded("proxy-new", 5000, now=t + s.policy.fleet_guard + 1)
+
+
+def test_fleet_rule_waits_for_warmup_and_can_be_turned_off():
+    s = Spider(policy(bucket=600, fleet_warmup=3, fleet_floor=20))
+    for i in range(300):
+        s.observe(f"proxy-{i}", "Mozilla/5.0", 1000 + i, float(i))
+    assert s.inspect(now=300.0) == []                       # no baseline yet: never trips
+    off = Spider(Policy({"SPIDER_FLEET": "off"}))
+    off.observe("a", "ua", 1, 0.0)
+    assert off.inspect(now=1.0) == [] and not off.guarded("a", 2, now=1.0)
+
+
+def test_fleet_baseline_cannot_be_taught_quickly():
+    s = Spider(policy(bucket=10, fleet_warmup=0, fleet_floor=1000, fleet_growth=1.1, fleet_alpha=1.0))
+    base = 0
+    for slot in range(1, 6):                                # quiet 10 products per slot, then a jump to 500
+        n = 10 if slot < 5 else 500
+        for i in range(n):
+            s.observe(f"a{slot}-{i}", "ua", slot * 10000 + i, slot * 10 + i / 1000)
+        s.inspect(now=slot * 10 + 9.99)
+        s.inspect(now=slot * 10 + 10.0)
+        base = s.baseline
+    assert base <= 10 * 1.1 + 1e-9                          # learned at most +10% from the jump
+
+
+def test_fleet_limit_grows_through_the_slot_so_a_burst_trips_early():
+    s = Spider(policy(bucket=3600, fleet_warmup=1, fleet_floor=20, fleet_factor=4, period=60))
+    for i in range(30):                                     # one quiet slot: baseline 30 per hour
+        s.observe(f"home-{i}", "ua", 10_000 + i, float(i))
+    s.inspect(now=3600.0)
+    for i in range(70):                                     # 70 in the first 10 minutes of the next slot
+        s.observe(f"proxy-{i}", "ua", 20_000 + i, 3600.0 + i * 8)
+    assert rules(s.inspect(now=3600.0 + 600)) == ["fleet_tail"]   # limit at 10 min: max(20, 120/6) = 20
+
+
+def test_padding_with_popular_products_does_not_make_an_address_warm():
+    s = Spider(policy(fleet_new=3600, fleet_cold=30))
+    for k in range(10):                                     # analyst F1: 10 popular views first
+        s.observe("proxy-1", "ua", 1 + k % 3, float(k))
+    assert s._cold("proxy-1", 20.0) and not s._cold("proxy-1", 4000.0)
+
+
+def test_shadowed_views_do_not_make_a_product_popular():
+    s = Spider(policy())
+    s.observe("proxy-1", "ua", 500, 1.0, shadowed=True)
+    s.observe("proxy-2", "ua", 500, 2.0, shadowed=True)
+    assert s._is_tail("control", 500, 3.0)                 # a control re-fetch still meets the same guard
+
+
+def test_a_quiet_slot_ends_the_guard_early_and_cusum_catches_a_slow_excess():
+    s = Spider(policy(bucket=100, fleet_warmup=4, fleet_floor=1000, fleet_cusum_h=4, fleet_cusum_k=0.5,
+                      window=200))
+    n = 0
+    for slot in range(30):
+        extra = 25 if slot >= 10 else 0                     # from slot 10: 25 more rare products per slot
+        for i in range(20 + (slot % 3) + extra):
+            n += 1
+            s.observe(f"a{n}", "ua", 10_000 + n, slot * 100 + i * 0.1)
+        s.inspect(now=slot * 100 + 99.9)
+        s.inspect(now=slot * 100 + 100.0)
+    assert any(tr for _, _, tr in s.slots[10:]) and not any(tr for _, _, tr in s.slots[:10])
+    q = Spider(policy(bucket=100, fleet_guard=10_000))
+    q.guard_until = 500.0
+    q.observe("a", "ua", 1, 0.0)
+    q.inspect(now=100.0)                                    # a slot closes without a trip
+    assert q.guard_until <= 100.0

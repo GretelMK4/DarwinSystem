@@ -20,6 +20,30 @@ rules that the site owner sets:
     many_identities one address presenting more than MAX_IDENTITIES different
                     User-Agents.
 
+  The whole site (fleet rule, for swarms spread over many addresses)
+    fleet_tail      in one BUCKET-second slot, cold addresses (FLEET_COLD views
+                    or fewer) opened more rarely-viewed products (seen by at most
+                    FLEET_TAIL_POP other addresses) than FLEET_FACTOR times the
+                    learned baseline, and at least FLEET_FLOOR. A residential-proxy
+                    swarm that takes 3 products per address is invisible to every
+                    per-address rule but still has to touch the long tail of the
+                    catalog that shoppers rarely open. The flag opens a guard for
+                    FLEET_GUARD seconds; guarded(address, product) tells the shop
+                    which requests the guard covers (cold address + tail product).
+                    The baseline learns only from slots that did not trip, and
+                    grows at most FLEET_GROWTH per slot, so a swarm that ramps up
+                    slowly cannot teach the Spider that its volume is normal.
+                    It never trips during the first FLEET_WARMUP slots after
+                    start-up, while popularity is still being learned.
+                    A product the guard shadowed stays shadowed for cold visitors
+                    for FLEET_STICKY seconds while it is still a tail product
+                    (note_shadow), so a swarm that
+                    re-fetches its loot later from a clean control identity sees
+                    the same answer and cannot tell it was fed fakes.
+                    Limit: the rule bounds how FAST a spread-out swarm can copy
+                    (about FLEET_FACTOR x the shoppers' own tail rate); a swarm
+                    patient enough to stay under that still copies everything.
+
   Darwin itself
     component_changed   a watched file (Darwin's own code, the dashboard) no
                         longer matches the fingerprint taken at start-up.
@@ -69,6 +93,27 @@ class Policy:
         self.metronome_cv = get("METRONOME_CV", 0.10)      # gap variation below this = a timer
         self.max_identities = get("MAX_IDENTITIES", 20, int)
         self.period = get("PERIOD", 5.0)                   # seconds between inspections
+        self.fleet = environ.get("SPIDER_FLEET", "on") == "on"
+        self.bucket = get("BUCKET", 3600)                  # fleet rule: seconds per slot
+        self.fleet_cold = get("FLEET_COLD", 30, int)       # cold = first seen at most FLEET_NEW s ago ...
+        self.fleet_new = get("FLEET_NEW", 3600)            # ... and at most FLEET_COLD views in the window
+        self.fleet_tail_pop = get("FLEET_TAIL_POP", 1, int)  # a product seen by this many others or fewer is tail
+        self.fleet_factor = get("FLEET_FACTOR", 4.0)
+        self.fleet_floor = get("FLEET_FLOOR", 60, int)     # never trip below this many cold-tail products per slot
+        self.fleet_guard = get("FLEET_GUARD", 21600)       # seconds the guard stays up after a trip
+        self.fleet_growth = get("FLEET_GROWTH", 1.01)      # most the baseline may grow per slot
+        self.fleet_alpha = get("FLEET_ALPHA", 0.02)        # baseline learning rate after warm-up
+                                                           # (only in quiet slots)
+        self.fleet_warmup = get("FLEET_WARMUP", 48, int)   # slots before the rule may trip. The reference
+                                                           # is learned only from warm-up slots after the
+                                                           # first popularity WINDOW (when everything
+                                                           # still looks rare)
+        self.cusum_k = get("FLEET_CUSUM_K", 1.0)           # slow-attack detector: allowance, in reference sd
+        self.cusum_h = get("FLEET_CUSUM_H", 0.0)           # ... and trip level, in reference sd (0 = off;
+                                                           # 8 caught a slow swarm in the lab, but with
+                                                           # fakes as the guard action it cost shoppers)
+        self.fleet_sticky = get("FLEET_STICKY", 0)         # a product shadowed by the guard stays shadowed
+                                                           # for cold visitors this long (0 = off)
 
 
 class Spider:
@@ -81,19 +126,124 @@ class Spider:
         self._views = collections.defaultdict(collections.deque)    # address -> deque of (t, product)
         self._identities = collections.defaultdict(set)             # address -> User-Agents seen
         self._fingerprints = {}                # path -> sha256 at start-up
+        self._viewers = collections.defaultdict(collections.deque)  # product -> deque of (t, address)
+        self._viewer_n = collections.defaultdict(collections.Counter)  # product -> address -> live views
+        self._slot = None                      # fleet rule: start of the current slot
+        self._slot_tail = set()                # cold-tail products seen in the current slot
+        self.baseline = None                   # learned cold-tail products per slot
+        self.guard_until = 0.0
+        self._warm_counts = []                 # slot counts seen during warm-up (the frozen reference)
+        self.ref_sd = None
+        self.cusum = 0.0                       # accumulated excess over the reference, slot by slot
+        self._sticky = {}                      # product -> shadow cold visitors until this time
+        self.slots = []                        # (slot start, cold-tail count, tripped) for people
         self._lock = threading.Lock()
         self._stop = threading.Event()
 
     # ---------- what the Spider is told ----------
 
-    def observe(self, address, user_agent, product, t=None):
-        """The shop reports every product-page request here, whatever it answered."""
+    def observe(self, address, user_agent, product, t=None, shadowed=False):
+        """The shop reports every product-page request here, whatever it answered. `shadowed`: the
+        fleet guard answered it with the shadow page, so it must not make the product look popular."""
         t = time.time() if t is None else t
         with self._lock:
+            if self.policy.fleet:
+                self._fleet_observe(address, product, t, shadowed)
             self._views[address].append((t, product))
             ids = self._identities[address]
             if len(ids) <= self.policy.max_identities:
                 ids.add(user_agent)
+
+    # ---------- fleet rule ----------
+
+    def _is_tail(self, address, product, t):
+        q, n = self._viewers[product], self._viewer_n[product]
+        while q and t - q[0][0] > self.policy.window:
+            _, old = q.popleft()
+            n[old] -= 1
+            if not n[old]:
+                del n[old]
+        others = len(n) - (1 if address in n else 0)
+        return others <= self.policy.fleet_tail_pop
+
+    def _cold(self, address, t):
+        """New to the site: first seen at most FLEET_NEW seconds ago, and few views. Padding with
+        popular products does not make an address warm; only time does."""
+        views = self._views.get(address)
+        if not views:
+            return True
+        return t - views[0][0] <= self.policy.fleet_new and len(views) <= self.policy.fleet_cold
+
+    def _fleet_observe(self, address, product, t, shadowed=False):
+        p = self.policy
+        if self._slot is None:
+            self._slot = t - (t % p.bucket)
+        if self._cold(address, t) and self._is_tail(address, product, t):
+            self._slot_tail.add(product)
+        if not shadowed:
+            self._viewers[product].append((t, address))
+            self._viewer_n[product][address] += 1
+
+    def _fleet_inspect(self, now, found):
+        p = self.policy
+        if self._slot is None:
+            return
+        count = len(self._slot_tail)
+        # the limit grows through the slot, so a burst trips early instead of at the slot's end
+        elapsed = min(1.0, max(now - self._slot, p.period) / p.bucket)
+        limit = max(p.fleet_floor, p.fleet_factor * (self.baseline or 0) * elapsed)
+        warm = len(self.slots) >= p.fleet_warmup and self.baseline is not None
+        tripped = count > limit and warm
+        closing = now - self._slot >= p.bucket
+        slow = False
+        if closing and warm and self.ref_sd is not None and not tripped and p.cusum_h > 0:
+            # slow-attack detector (CUSUM), once per slot. Burst slots are left to the burst limit, and
+            # the excess is capped, so that one burst does not keep the guard up for days afterwards.
+            self.cusum = min(2 * p.cusum_h * self.ref_sd,
+                             max(0.0, self.cusum + count - self.baseline - p.cusum_k * self.ref_sd))
+            slow = self.cusum > p.cusum_h * self.ref_sd
+        if (tripped or slow) and now >= self.guard_until:
+            why = (f"{count} rarely-viewed products opened by cold addresses this slot "
+                   f"(baseline {self.baseline or 0:.0f}, limit {limit:.0f})") if tripped else (
+                   f"cold-tail views have run above the baseline ({self.baseline:.0f}) for hours "
+                   f"(excess {self.cusum:.0f})")
+            found.append(("fleet", "fleet_tail", why))
+        if tripped or slow:
+            self.guard_until = max(self.guard_until, now + p.fleet_guard)
+        if closing:                                       # close the slot
+            self.slots.append((self._slot, count, tripped or slow))
+            if not warm:
+                if len(self.slots) > min(p.window / p.bucket, p.fleet_warmup // 2):
+                    self._warm_counts.append(count)
+                # learn the reference from the warm-up slots only; the first slots after start-up see
+                # everything as rare, so the median is used rather than the mean
+                ref = sorted(self._warm_counts)
+                if ref:
+                    self.baseline = float(ref[len(ref) // 2])
+                    self.ref_sd = max(1.0, statistics.pstdev(ref)) if len(ref) > 1 else None
+            elif not (tripped or slow) and self.cusum == 0.0:
+                target = (1 - p.fleet_alpha) * self.baseline + p.fleet_alpha * count
+                self.baseline = min(target, max(self.baseline, 1.0) * p.fleet_growth)
+            if not (tripped or slow) and (self.ref_sd is None or self.cusum <= p.cusum_h * self.ref_sd or p.cusum_h <= 0):
+                self.guard_until = min(self.guard_until, now)   # a quiet slot ends the guard early
+            self._slot = now - (now % p.bucket)
+            self._slot_tail = set()
+
+    def guarded(self, address, product, now=None):
+        """True when the fleet guard is up and this request is a cold address opening a tail product."""
+        now = time.time() if now is None else now
+        sticky = self._sticky.get(product, 0.0) > now
+        if now >= self.guard_until and not sticky:
+            return False
+        with self._lock:
+            return self._cold(address, now) and self._is_tail(address, product, now)
+
+    def note_shadow(self, product, now=None):
+        """The shop served a guard shadow for this product: keep doing so for cold visitors for
+        FLEET_STICKY seconds, so that a clean identity re-fetching it later sees the same answer."""
+        now = time.time() if now is None else now
+        if self.policy.fleet_sticky > 0:
+            self._sticky[product] = now + self.policy.fleet_sticky
 
     def watch_files(self, paths):
         """Take a fingerprint of each file now; any later difference is flagged."""
@@ -140,12 +290,14 @@ class Spider:
             for address in [a for a, v in self._views.items() if not v]:
                 del self._views[address]
                 self._identities.pop(address, None)
+            if p.fleet:
+                self._fleet_inspect(now, found)
         for path, expected in self._fingerprints.items():
             if self._hash(path) != expected:
                 found.append((path, "component_changed", "file no longer matches its start-up fingerprint"))
         new = []
         for subject, rule, evidence in found:
-            if (subject, rule) in self._flagged:
+            if (subject, rule) in self._flagged and rule != "fleet_tail":
                 continue
             self._flagged.add((subject, rule))
             flag = {"t": now, "subject": subject, "rule": rule, "evidence": evidence}

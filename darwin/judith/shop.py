@@ -56,7 +56,12 @@ Optional alarm signals
                         whose browser has JavaScript turned off.
     INTEL=on        accept signed intel from Hercules (identities seen there,
                     fake keys it issued, surge reports) on the admin port.
-                    Requires DARWIN_INTEL_KEY; see darwin/intel.py.
+                    Requires DARWIN_INTEL_KEY (one shared key) or, better,
+                    DARWIN_INTEL_KEYS (one key per plant); see darwin/intel.py.
+                    INTEL_QUORUM=2 seals an identity only once two different
+                    plants reported it (refused without per-plant keys).
+                    INTEL_TTL (default 86400 s): reports expire. INTEL_ME:
+                    refuse messages addressed to another receiver.
 
 The Spider (SPIDER=seal|alert|off, default seal)
     Judith's internal watcher for patient attackers; see spider.py. It keeps a
@@ -155,8 +160,16 @@ else:
 LOCKDOWN_MODE = MODE.startswith("lockdown")
 SHIELD = MODE == "lockdown"
 INTEL_ON = os.environ.get("INTEL", "off") == "on"     # accept signed intel from Hercules
-INTEL_IDS, INTEL_TOKENS = set(), set()
-INTEL_MAX = 200_000                                   # most identities / keys remembered
+INTEL_QUORUM = int(os.environ.get("INTEL_QUORUM", "2" if os.environ.get(intel.ENV_KEYS) else "1"))
+                                                           # different plants that must report an identity
+                                                           # (2 by default with per-plant keys)
+INTEL_TTL = float(os.environ.get("INTEL_TTL", "86400"))    # seconds a report stays valid
+INTEL_ME = os.environ.get("INTEL_ME") or None              # this receiver's name; set it to refuse
+                                                           # messages addressed to another receiver
+INTEL_MAX = 200_000                                   # most identities / keys remembered per sender
+INTEL_IDS = intel.IntelStore(quorum=INTEL_QUORUM, ttl=INTEL_TTL, per_sender=INTEL_MAX)
+INTEL_TOKENS = intel.IntelStore(quorum=1, ttl=INTEL_TTL, per_sender=INTEL_MAX)   # a fake key is ours: one
+                                                                                 # plant seeing it used is proof
 INTEL_VERIFIER = None                                 # set in main() when INTEL=on
 INTEL_REJECTED = collections.Counter()
 CRAWLERS = crawlers.CrawlerVerifier()
@@ -390,8 +403,10 @@ class Handler(QuietHandler):
             self.serve_crawler(path, query)
             return
         is_human = ua.startswith("Mozilla")               # measurement only
+        fleet_guard = False
         if SPIDER is not None and path.startswith("/shop/item/") and item_id(path):
-            SPIDER.observe(self.client_address[0], ua, item_id(path), t0)
+            fleet_guard = SPIDER_MODE == "seal" and SPIDER.guarded(self.client_address[0], item_id(path), t0)
+            SPIDER.observe(self.client_address[0], ua, item_id(path), t0, shadowed=fleet_guard)
         pit = pitcher_of(path)
         is_catalog = path.startswith("/shop/")
         honey = honey_id(path)
@@ -537,10 +552,15 @@ class Handler(QuietHandler):
             st, ct, body = static_page(path, query)
         elif path.startswith("/shop/item/") and item_id(path):
             n = item_id(path)
-            if sealed:
+            if sealed or fleet_guard:
                 with LOCK:
                     real_ok = SHIELD and n in SHIELD_SET
-                if real_ok:
+                if fleet_guard and not sealed:
+                    SPIDER.note_shadow(n, t0)
+                    body, kind = item_page(n, fake=True), "fleet_shadow"
+                    with LOCK:
+                        FAKE_ITEMS.add(n)
+                elif real_ok:
                     body, kind = item_page(n), "shadow_real"
                 else:
                     body, kind = item_page(n, fake=True), "shadow_fake"
@@ -578,7 +598,7 @@ class Handler(QuietHandler):
             if is_human:
                 HUMAN["requests"] += 1
                 HUMAN["latency_ms_total"] += dt * 1000
-                HUMAN["fake_pages"] += kind == "shadow_fake"
+                HUMAN["fake_pages"] += kind in ("shadow_fake", "fleet_shadow")
                 HUMAN["blocked"] += kind == "blocked"
                 HUMAN["busy"] += kind == "busy"
                 HUMAN["challenges"] += kind == "challenge"
@@ -667,16 +687,16 @@ class Admin(QuietHandler):
         if not 0 < n <= intel.MAX_MESSAGE_BYTES:
             return 413, "bad length"
         try:
-            d = INTEL_VERIFIER.verify(json.loads(self.rfile.read(n)))
+            env = json.loads(self.rfile.read(n))
+            d = INTEL_VERIFIER.verify(env)
         except ValueError as e:                                        # bad JSON or intel.IntelError
             return 403, str(e) if isinstance(e, intel.IntelError) else "malformed envelope"
+        sender = env["sender"]                                         # verified: bound to its key
         ids = [x[:MAX_UA + 64] for x in d.get("identities", []) if isinstance(x, str)]
         toks = [x for x in d.get("tokens", []) if isinstance(x, str) and len(x) <= 128]
         with LOCK:
-            if len(INTEL_IDS) + len(ids) <= INTEL_MAX:
-                INTEL_IDS.update(ids)
-            if len(INTEL_TOKENS) + len(toks) <= INTEL_MAX:
-                INTEL_TOKENS.update(toks)
+            INTEL_IDS.add(sender, ids)             # capped per message and per sender; expires after INTEL_TTL
+            INTEL_TOKENS.add(sender, toks)
             if d.get("surge") is True:                                 # Hercules: a swarm is out there
                 note_trigger("hercules_surge", time.time(), "hercules|hercules")
         return 200, None
@@ -701,7 +721,7 @@ def spider_flag(flag):
         SPIDER_FLAGS.append({"at_s": round(flag["t"] - STATE["start"], 1), "subject": subject, "rule": flag["rule"],
                              "evidence": flag["evidence"], "real_products_held_when_flagged": len(held)})
         event("SPIDER_FLAG", subject, f"{flag['rule']}: {flag['evidence']}")
-        if SPIDER_MODE == "seal" and flag["rule"] != "component_changed":
+        if SPIDER_MODE == "seal" and flag["rule"] not in ("component_changed", "fleet_tail"):
             SPIDER_SEALED.add(subject)
 
 
@@ -721,11 +741,26 @@ class ShopServer(ThreadingHTTPServer):
     daemon_threads = True
 
 
+def make_verifier(environ, quorum, me=None):
+    """Per-plant keys when DARWIN_INTEL_KEYS is set, else the shared key. A quorum of 2 or more is refused
+    with a shared key: whoever steals that one key can sign as every witness."""
+    keys = intel.keys_from_env(environ)
+    if keys:
+        if not me:
+            raise intel.IntelError("per-plant keys need INTEL_ME (this receiver's name, e.g. judith), so that "
+                                   "a message addressed to Venus cannot be replayed into Judith")
+        return intel.Verifier(keys=keys, me=me)
+    if quorum >= 2:
+        raise intel.IntelError("INTEL_QUORUM=2 or more needs per-plant keys (DARWIN_INTEL_KEYS): with one "
+                               "shared key, one stolen key can sign as every witness")
+    return intel.Verifier(intel.key_from_env(environ), me=me)
+
+
 def main():
     global INTEL_VERIFIER
     if INTEL_ON:
         try:
-            INTEL_VERIFIER = intel.Verifier(intel.key_from_env())
+            INTEL_VERIFIER = make_verifier(os.environ, INTEL_QUORUM, INTEL_ME)
         except intel.IntelError as e:
             sys.exit(f"INTEL=on but {e}")
     if SPIDER_MODE in ("alert", "seal"):
