@@ -67,5 +67,20 @@ def test_shop_refuses_quorum_two_with_a_shared_key():
     with pytest.raises(intel.IntelError, match="per-plant keys"):
         shop.make_verifier({intel.ENV_KEY: "s" * 32}, quorum=2)
     assert shop.make_verifier({intel.ENV_KEY: "s" * 32}, quorum=1).keys == {}
+    with pytest.raises(intel.IntelError, match="INTEL_ME"):     # analyst F4: per-plant keys need a name
+        shop.make_verifier({intel.ENV_KEYS: "hercules-1=" + "1" * 32}, quorum=2)
     v = shop.make_verifier({intel.ENV_KEYS: "hercules-1=" + "1" * 32}, quorum=2, me="judith")
     assert v.me == "judith" and set(v.keys) == {"hercules-1"}
+
+
+def test_one_plant_cannot_block_another_by_reusing_its_nonce():
+    v = intel.Verifier(keys=KEYS)
+    honest = intel.sign(P, K2, sender="hercules-2")
+    import hashlib
+    import hmac
+    squatter = intel.sign({"identities": []}, K1, sender="hercules-1")
+    squatter["nonce"] = honest["nonce"]                      # re-sign with the copied nonce
+    squatter["mac"] = hmac.new(K1, intel._canonical("hercules-1", squatter["ts"], squatter["nonce"],
+                                                    squatter["payload"]), hashlib.sha256).hexdigest()
+    v.verify(squatter)
+    assert v.verify(honest) == P                             # analyst F8: the honest message still counts

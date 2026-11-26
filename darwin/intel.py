@@ -102,7 +102,7 @@ class Verifier:
         if any(len(k) < MIN_KEY_BYTES for k in self.keys.values()):
             raise IntelError(f"every per-plant intel key must be at least {MIN_KEY_BYTES} bytes")
         self.key, self.max_age, self.me = key, max_age, me
-        self._seen = {}                      # nonce -> message timestamp
+        self._seen = {}                      # (sender, nonce) -> message timestamp
         self._lock = threading.Lock()
 
     def verify(self, envelope, now: float = None) -> dict:
@@ -133,9 +133,11 @@ class Verifier:
         with self._lock:
             for old in [n for n, t in self._seen.items() if now - t > self.max_age]:
                 del self._seen[old]
-            if nonce in self._seen:
+            # keyed by sender too: otherwise one plant could block another plant's honest message by
+            # signing its own first with the same (visible) nonce
+            if (sender, nonce) in self._seen:
                 raise IntelError("replayed message")
-            self._seen[nonce] = ts
+            self._seen[(sender, nonce)] = ts
         return payload
 
 

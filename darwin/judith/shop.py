@@ -160,7 +160,9 @@ else:
 LOCKDOWN_MODE = MODE.startswith("lockdown")
 SHIELD = MODE == "lockdown"
 INTEL_ON = os.environ.get("INTEL", "off") == "on"     # accept signed intel from Hercules
-INTEL_QUORUM = int(os.environ.get("INTEL_QUORUM", "1"))   # different plants that must report an identity
+INTEL_QUORUM = int(os.environ.get("INTEL_QUORUM", "2" if os.environ.get(intel.ENV_KEYS) else "1"))
+                                                           # different plants that must report an identity
+                                                           # (2 by default with per-plant keys)
 INTEL_TTL = float(os.environ.get("INTEL_TTL", "86400"))    # seconds a report stays valid
 INTEL_ME = os.environ.get("INTEL_ME") or None              # this receiver's name; set it to refuse
                                                            # messages addressed to another receiver
@@ -404,7 +406,7 @@ class Handler(QuietHandler):
         fleet_guard = False
         if SPIDER is not None and path.startswith("/shop/item/") and item_id(path):
             fleet_guard = SPIDER_MODE == "seal" and SPIDER.guarded(self.client_address[0], item_id(path), t0)
-            SPIDER.observe(self.client_address[0], ua, item_id(path), t0)
+            SPIDER.observe(self.client_address[0], ua, item_id(path), t0, shadowed=fleet_guard)
         pit = pitcher_of(path)
         is_catalog = path.startswith("/shop/")
         honey = honey_id(path)
@@ -596,7 +598,7 @@ class Handler(QuietHandler):
             if is_human:
                 HUMAN["requests"] += 1
                 HUMAN["latency_ms_total"] += dt * 1000
-                HUMAN["fake_pages"] += kind == "shadow_fake"
+                HUMAN["fake_pages"] += kind in ("shadow_fake", "fleet_shadow")
                 HUMAN["blocked"] += kind == "blocked"
                 HUMAN["busy"] += kind == "busy"
                 HUMAN["challenges"] += kind == "challenge"
@@ -719,7 +721,7 @@ def spider_flag(flag):
         SPIDER_FLAGS.append({"at_s": round(flag["t"] - STATE["start"], 1), "subject": subject, "rule": flag["rule"],
                              "evidence": flag["evidence"], "real_products_held_when_flagged": len(held)})
         event("SPIDER_FLAG", subject, f"{flag['rule']}: {flag['evidence']}")
-        if SPIDER_MODE == "seal" and flag["rule"] != "component_changed":
+        if SPIDER_MODE == "seal" and flag["rule"] not in ("component_changed", "fleet_tail"):
             SPIDER_SEALED.add(subject)
 
 
@@ -744,6 +746,9 @@ def make_verifier(environ, quorum, me=None):
     with a shared key: whoever steals that one key can sign as every witness."""
     keys = intel.keys_from_env(environ)
     if keys:
+        if not me:
+            raise intel.IntelError("per-plant keys need INTEL_ME (this receiver's name, e.g. judith), so that "
+                                   "a message addressed to Venus cannot be replayed into Judith")
         return intel.Verifier(keys=keys, me=me)
     if quorum >= 2:
         raise intel.IntelError("INTEL_QUORUM=2 or more needs per-plant keys (DARWIN_INTEL_KEYS): with one "

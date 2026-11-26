@@ -300,7 +300,7 @@ def test_fleet_guard_serves_the_shadow_to_a_guarded_request(shop_url):
         def __init__(self):
             self.noted = []
 
-        def observe(self, *a):
+        def observe(self, *a, **k):
             pass
 
         def guarded(self, address, product, now=None):
