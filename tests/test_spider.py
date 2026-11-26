@@ -125,3 +125,13 @@ def test_fleet_baseline_cannot_be_taught_quickly():
         s.inspect(now=slot * 10 + 10.0)
         base = s.baseline
     assert base <= 10 * 1.1 + 1e-9                          # learned at most +10% from the jump
+
+
+def test_fleet_limit_grows_through_the_slot_so_a_burst_trips_early():
+    s = Spider(policy(bucket=3600, fleet_warmup=1, fleet_floor=20, fleet_factor=4, period=60))
+    for i in range(30):                                     # one quiet slot: baseline 30 per hour
+        s.observe(f"home-{i}", "ua", 10_000 + i, float(i))
+    s.inspect(now=3600.0)
+    for i in range(70):                                     # 70 in the first 10 minutes of the next slot
+        s.observe(f"proxy-{i}", "ua", 20_000 + i, 3600.0 + i * 8)
+    assert rules(s.inspect(now=3600.0 + 600)) == ["fleet_tail"]   # limit at 10 min: max(20, 120/6) = 20

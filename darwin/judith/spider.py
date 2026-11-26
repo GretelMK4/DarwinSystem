@@ -168,7 +168,9 @@ class Spider:
         if self._slot is None:
             return
         count = len(self._slot_tail)
-        limit = max(p.fleet_floor, p.fleet_factor * (self.baseline or 0))
+        # the limit grows through the slot, so a burst trips early instead of at the slot's end
+        elapsed = min(1.0, max(now - self._slot, p.period) / p.bucket)
+        limit = max(p.fleet_floor, p.fleet_factor * (self.baseline or 0) * elapsed)
         tripped = count > limit and len(self.slots) >= p.fleet_warmup
         if tripped and now >= self.guard_until:
             found.append(("fleet", "fleet_tail",
