@@ -154,7 +154,7 @@ def test_shadowed_views_do_not_make_a_product_popular():
 def test_a_quiet_slot_ends_the_guard_early_and_cusum_catches_a_slow_excess():
     s = Spider(policy(bucket=100, fleet_warmup=4, fleet_floor=1000, fleet_cusum_h=4, fleet_cusum_k=0.5,
                       window=200))
-    n, t = 0, 0.0
+    n = 0
     for slot in range(30):
         extra = 25 if slot >= 10 else 0                     # from slot 10: 25 more rare products per slot
         for i in range(20 + (slot % 3) + extra):
