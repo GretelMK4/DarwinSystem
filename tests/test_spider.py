@@ -89,7 +89,7 @@ def _shoppers(s, t0, t1, rng, popular=50):
 def test_fleet_rule_catches_a_spread_out_swarm_and_guards_only_cold_tail_requests():
     import random
     rng = random.Random(1)
-    s = Spider(policy(bucket=600, fleet_warmup=3, fleet_floor=20, period=60))
+    s = Spider(policy(bucket=600, fleet_warmup=3, fleet_floor=20, period=60, window=1200))
     t = 0.0
     for k in range(6):                                      # learn a quiet baseline
         t = _shoppers(s, t, t + 600, rng)
@@ -135,3 +135,36 @@ def test_fleet_limit_grows_through_the_slot_so_a_burst_trips_early():
     for i in range(70):                                     # 70 in the first 10 minutes of the next slot
         s.observe(f"proxy-{i}", "ua", 20_000 + i, 3600.0 + i * 8)
     assert rules(s.inspect(now=3600.0 + 600)) == ["fleet_tail"]   # limit at 10 min: max(20, 120/6) = 20
+
+
+def test_padding_with_popular_products_does_not_make_an_address_warm():
+    s = Spider(policy(fleet_new=3600, fleet_cold=30))
+    for k in range(10):                                     # analyst F1: 10 popular views first
+        s.observe("proxy-1", "ua", 1 + k % 3, float(k))
+    assert s._cold("proxy-1", 20.0) and not s._cold("proxy-1", 4000.0)
+
+
+def test_shadowed_views_do_not_make_a_product_popular():
+    s = Spider(policy())
+    s.observe("proxy-1", "ua", 500, 1.0, shadowed=True)
+    s.observe("proxy-2", "ua", 500, 2.0, shadowed=True)
+    assert s._is_tail("control", 500, 3.0)                 # a control re-fetch still meets the same guard
+
+
+def test_a_quiet_slot_ends_the_guard_early_and_cusum_catches_a_slow_excess():
+    s = Spider(policy(bucket=100, fleet_warmup=4, fleet_floor=1000, fleet_cusum_h=4, fleet_cusum_k=0.5,
+                      window=200))
+    n, t = 0, 0.0
+    for slot in range(30):
+        extra = 25 if slot >= 10 else 0                     # from slot 10: 25 more rare products per slot
+        for i in range(20 + (slot % 3) + extra):
+            n += 1
+            s.observe(f"a{n}", "ua", 10_000 + n, slot * 100 + i * 0.1)
+        s.inspect(now=slot * 100 + 99.9)
+        s.inspect(now=slot * 100 + 100.0)
+    assert any(tr for _, _, tr in s.slots[10:]) and not any(tr for _, _, tr in s.slots[:10])
+    q = Spider(policy(bucket=100, fleet_guard=10_000))
+    q.guard_until = 500.0
+    q.observe("a", "ua", 1, 0.0)
+    q.inspect(now=100.0)                                    # a slot closes without a trip
+    assert q.guard_until <= 100.0

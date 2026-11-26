@@ -11,6 +11,10 @@ on this request -> shadow page, otherwise the real page):
   hydra_slow     the same 6,000 products spread over 72 h
   hydra_ramp     boiling frog: day 1 small, doubling each day
   hydra_padded   each address first opens 3 popular products, then 3 tail ones
+  hydra_padded10 the same with 10 popular products first (analyst F1)
+  vantage_warm   vantage, but one long-lived control identity does all re-fetches (analyst F3)
+  (hydra uses 1,000 addresses x 3 = the whole 3,000-product catalog; 2,000 x 3 asked for more
+   products than exist, analyst artifact A1)
 Intel group (three Hercules, one compromised; Judith and Venus receive):
   forged_witness compromised plant signs reports as itself AND as another plant
                  to meet a 2-witness quorum, naming 3,000 shopper identities
@@ -70,7 +74,7 @@ def shopper_events(rng, days, per_day=3000):
     return ev
 
 
-def hydra_events(rng, start, spread, n_addr=2000, per_addr=3, pad_popular=0, schedule=None):
+def hydra_events(rng, start, spread, n_addr=1000, per_addr=3, pad_popular=0, schedule=None):
     """Residential-proxy swarm: every address takes a few products the swarm has not yet got."""
     products = list(range(1, CATALOG + 1))
     rng.shuffle(products)
@@ -111,12 +115,20 @@ def run_spider(scenario, seed, fixed, days=4, inspect_every=600.0):
         days = 6
         ev += [e for e in shopper_events(random.Random(seed + 99), 6) if e[0] >= 4 * DAY]
     elif scenario == "hydra_ramp":
-        sched = [(DAY * (1 + d), 6 * 3600, n) for d, n in enumerate([60, 120, 240, 480, 1100])]
+        sched = [(DAY * (1 + d), 6 * 3600, n) for d, n in enumerate([30, 60, 120, 240, 550])]
         ev += hydra_events(rng, 0, 0, schedule=sched)
         days = 6
         ev += [e for e in shopper_events(random.Random(seed + 99), 6) if e[0] >= 4 * DAY]
     elif scenario == "hydra_padded":
         ev += hydra_events(rng, t0, 6 * 3600, pad_popular=3)
+    elif scenario == "hydra_padded10":                      # analyst F1: pads past the old view-count test
+        ev += hydra_events(rng, t0, 6 * 3600, pad_popular=10)
+    elif scenario == "vantage_warm":                        # analyst F3: one long-lived control identity
+        hv = hydra_events(rng, t0, 6 * 3600)
+        ev += hv
+        ev += [(2 * DAY + 600 * k, "control-warm", "Mozilla/5.0 (Mac) Safari", 2 + k % 20, "warmup", 0) for k in range(10)]
+        ev += [(t + rng.uniform(2, 12) * 3600, "control-warm", "Mozilla/5.0 (Mac) Safari", prod, "control", 0)
+               for (t, _, _, prod, kind, _) in hv if kind == "bot"]
     elif scenario == "vantage":                             # researcher scenario 2
         hv = hydra_events(rng, t0, 6 * 3600)
         ev += hv
@@ -139,10 +151,12 @@ def run_spider(scenario, seed, fixed, days=4, inspect_every=600.0):
                     sealed.add(f["subject"])
             next_inspect += inspect_every
         guarded = fixed and sp.guarded(addr, product, now=t)
-        sp.observe(addr, ua, product, t)
+        sp.observe(addr, ua, product, t, shadowed=guarded)
         shadow = addr in sealed or guarded
         if guarded:
             sp.note_shadow(product, now=t)
+        if kind == "warmup":
+            continue
         if kind == "control":
             ctrl_fake[product] = shadow
             continue
@@ -185,7 +199,12 @@ PLANTS = ["hercules-1", "hercules-2", "hercules-3"]
 
 def receiver(fixed, keys, shared, me):
     if fixed:
-        return intel.Verifier(keys=keys, me=me, max_age=60), intel.IntelStore(quorum=2, ttl=DAY)
+        # the shop's own configuration path (analyst F4): per-plant keys from DARWIN_INTEL_KEYS,
+        # INTEL_QUORUM's default with them, INTEL_ME required
+        from darwin.judith import shop
+        env = {intel.ENV_KEYS: ",".join(f"{k}={v.decode()}" for k, v in keys.items())}
+        quorum = 2                                        # shop default when DARWIN_INTEL_KEYS is set
+        return shop.make_verifier(env, quorum, me), intel.IntelStore(quorum=quorum, ttl=DAY)
     return intel.Verifier(shared, max_age=60), None
 
 
@@ -283,7 +302,8 @@ def run_intel(scenario, seed, fixed):
     return out
 
 
-SPIDER_SCENARIOS = ["shoppers", "hydra", "hydra_slow", "hydra_ramp", "hydra_padded", "vantage"]
+SPIDER_SCENARIOS = ["shoppers", "hydra", "hydra_slow", "hydra_ramp", "hydra_padded", "hydra_padded10", "vantage",
+                    "vantage_warm"]
 INTEL_SCENARIOS = ["forged_witness", "cross_replay", "intel_flood", "echo_double", "pollution"]
 
 
