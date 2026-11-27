@@ -1,6 +1,4 @@
 """Regression tests from the 2026-11-27 nightly lab. Each attacker built tonight stays here."""
-import hashlib
-import hmac
 import random
 
 from darwin.judith import shop
