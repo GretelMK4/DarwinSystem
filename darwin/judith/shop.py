@@ -184,6 +184,8 @@ INTEL_REJECTED = collections.Counter()
 CRAWLERS = crawlers.CrawlerVerifier()
 SPIDER_MODE = os.environ.get("SPIDER", "seal")        # seal (default) | alert | off
 SPIDER = None                                         # the Spider object, created in main()
+FAKE_SEEN = {}                                        # address -> {product: keep it fake until}
+FAKE_SEEN_FOR = float(os.environ.get("FAKE_SEEN_FOR", "21600"))   # after a Spider seal ends
 SPIDER_SEALED = {}                                    # address or address|UA -> sealed until (seal mode)
 SPIDER_FLAGS = []                                     # what it has raised, for the stats port
 RELEASES = MODE in ("single", "multi") or LOCKDOWN_MODE
@@ -217,7 +219,7 @@ def _load_shadow_secret(environ=os.environ):
     (Nov 25 finding 20261125-2). DARWIN_SHADOW_SECRET sets it; otherwise one is made once and kept in
     results/shadow_secret, so the fakes stay the same across restarts (a sealed visitor that comes back
     after a restart must not see a different fake)."""
-    value = environ.get("DARWIN_SHADOW_SECRET")
+    value = environ.get("DARWIN_SHADOW_SECRET") or None    # empty = unset, as before
     if value is not None:
         if len(value.encode()) < 32:
             raise SystemExit("DARWIN_SHADOW_SECRET must be at least 32 bytes (a short one can be brute-forced "
@@ -225,20 +227,28 @@ def _load_shadow_secret(environ=os.environ):
         return value.encode()
     path = environ.get("DARWIN_SHADOW_SECRET_FILE") or results_path("shadow_secret")
     secret = os.urandom(32).hex().encode()
-    try:                                          # O_EXCL: workers starting together agree on one secret
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    try:
+        # write a temp file, then link it into place: the link fails if the file exists, so workers starting
+        # together agree on one secret, and a crash never leaves an empty secret file behind
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as f:
             f.write(secret)
-        return secret
-    except FileExistsError:
-        pass
-    for _ in range(50):                            # another worker may still be writing it
-        with open(path, "rb") as f:                # unreadable: fail closed rather than change the fakes
+        try:
+            os.link(tmp, path)
+            return secret
+        except FileExistsError:
+            pass
+        finally:
+            os.unlink(tmp)
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "rb") as f:
             got = f.read().strip()
-        if len(got) >= 32:
-            return got
-        time.sleep(0.02)
-    raise SystemExit(f"shadow secret file {path} is shorter than 32 bytes; fix or remove it")
+    except OSError as e:                           # unreadable: fail closed rather than change the fakes
+        raise SystemExit(f"cannot read or create the shadow secret file {path}: {e}")
+    if len(got) < 32:
+        raise SystemExit(f"shadow secret file {path} is shorter than 32 bytes; fix or remove it")
+    return got
 
 
 SHADOW_SECRET = _load_shadow_secret()
@@ -463,10 +473,16 @@ class Handler(QuietHandler):
             if c is None:
                 c = CLIENTS[client] = new_client(self.client_address[0], ua, t0)
             c["requests"] += 1
+            if c["sealed_at"] and c["trigger"] == "spider" and not spider_sealed(self.client_address[0], client, t0):
+                c["sealed_at"] = c["trigger"] = None          # the Spider seal ran out (analyst A1, 2026-11-27);
+                event("UNSEALED", client, "Spider seal expired")   # checked first so this request's own
+                                                                   # evidence below can seal it again (B5)
             if honey is not None:                                     # no human ever asks for this
                 note_trigger("honeylink", t0, client)
                 if not c["sealed_at"]:
                     seal(c, client, "honeylink", t0)
+                elif c["trigger"] == "spider":
+                    c["trigger"] = "honeylink"                        # stronger evidence: no longer expires
             if SURGE and is_catalog and not c.get("cat_first"):
                 c["cat_first"] = t0
                 NEW_CAT.append(t0)
@@ -475,12 +491,12 @@ class Handler(QuietHandler):
                 if len(NEW_CAT) >= SURGE_N and t0 - SURGE_STATE["last"] > 1:
                     SURGE_STATE["last"] = t0
                     note_trigger("surge", t0, client)
-            if c["sealed_at"] and c["trigger"] == "spider" and not spider_sealed(self.client_address[0], client, t0):
-                c["sealed_at"] = c["trigger"] = None          # the Spider seal ran out (analyst A1, 2026-11-27)
-                event("UNSEALED", client, "Spider seal expired")
             if not c["sealed_at"] and spider_sealed(self.client_address[0], client, t0):
                 note_trigger("spider", t0, client)                    # flagged by the internal watcher
                 seal(c, client, "spider", t0)
+            if INTEL_ON and c["trigger"] == "spider" and (client in INTEL_IDS
+                                                          or ts.key_from(self.headers) in INTEL_TOKENS):
+                c["trigger"] = "intel"                                # stronger evidence: no longer expires
             if INTEL_ON and not c["sealed_at"]:
                 if client in INTEL_IDS:                               # seen stuck on Hercules (address + User-Agent)
                     note_trigger("intel_hercules", t0, client)
@@ -508,6 +524,8 @@ class Handler(QuietHandler):
                     trig = True
                 if trig:
                     note_trigger(pit, t0, client)
+                    if c["trigger"] == "spider":
+                        c["trigger"] = pit                            # stronger evidence: no longer expires
                     locked = STATE["lockdown_at"] is not None
                     if not c["sealed_at"] and (not c["released"] or (LOCKDOWN_MODE and locked)):
                         seal(c, client, pit, t0)
@@ -585,7 +603,7 @@ class Handler(QuietHandler):
             st, ct, body, kind = 200, "application/json", ts.gold_file(path), "gold"
         elif pit:
             kind = "pitcher"
-            drip = DRIP * (1 + depth / 2) if DRIP_EVEN else DRIP * (3 if sealed else 1 + depth / 2)
+            drip = DRIP * (1 + min(depth, 4) / 2) if DRIP_EVEN else DRIP * (3 if sealed else 1 + depth / 2)
             if path == "/.env":
                 st, ct, body = 200, "text/plain", ts.dotenv()
             elif pit == "api":
@@ -601,12 +619,13 @@ class Handler(QuietHandler):
             st, ct, body = static_page(path, query)
         elif path.startswith("/shop/item/") and item_id(path):
             n = item_id(path)
-            if sealed or fleet_guard or n in c.get("fake_seen", ()):
+            seen_fake = FAKE_SEEN.get(self.client_address[0], {}).get(n, 0.0) > t0
+            if sealed or fleet_guard or seen_fake:
                 # a product once served fake to this visitor stays fake for it, even after its seal ran out,
                 # so the same visitor never sees the fake and the real page of one product (analyst A7)
                 with LOCK:
                     real_ok = SHIELD and n in SHIELD_SET
-                if n in c.get("fake_seen", ()):
+                if seen_fake:
                     body, kind = item_page(n, fake=True), "shadow_fake"
                 elif fleet_guard and not sealed:
                     SPIDER.note_shadow(n, t0)
@@ -629,9 +648,13 @@ class Handler(QuietHandler):
                         c["prob_items"] += 1
                     if not is_human:
                         STOLEN.add(n)
-            if kind in ("shadow_fake", "fleet_shadow"):
+            if kind == "shadow_fake" and c["trigger"] == "spider":
+                # keep this product fake for this ADDRESS (any browser) until the seal's end plus FAKE_SEEN_FOR,
+                # so a visitor neither sees both answers for one product right at expiry nor can switch
+                # User-Agent to compare (analyst A7, review B4); after that it gets the real page again
                 with LOCK:
-                    c.setdefault("fake_seen", set()).add(n)
+                    ends = max(SPIDER_SEALED.get(self.client_address[0], 0.0), SPIDER_SEALED.get(client, 0.0), t0)
+                    FAKE_SEEN.setdefault(self.client_address[0], {})[n] = ends + FAKE_SEEN_FOR
             st, ct = 200, "text/html"
         elif sealed and not DRIP_EVEN:
             kind, drip = "pitcher", DRIP * 3

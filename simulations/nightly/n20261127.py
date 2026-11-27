@@ -13,6 +13,7 @@ shop's spider_flag / spider_sealed decision) with simulated visitors.
   latency_tell    researcher scenario 1: time a pitcher page before and after the sealing request
                   (runs Judith's real shop on a localhost port of this process)
   token_frame     a compromised Hercules reports real customers' API keys as its fake keys
+  cgnat_public(_quiet)  the same carrier seen at a public address that is not in SPIDER_CROWD_NETS
   cgnat_framing   the same, but the copier uses the most common household browser string, so
                   its identity overlaps real people (20261125-4)
 
@@ -65,7 +66,7 @@ def run_cgnat(scenario, seed, fixed, days=3, inspect_every=300.0):
         pol.shared_uas = 10 ** 9                       # release: every flag seals the address, forever
     sp = Spider(pol)
     sealed = {}                                        # subject -> until (same rule as shop.spider_sealed)
-    addr = "100.64.7.7"
+    addr = "198.51.100.7" if scenario.startswith("cgnat_public") else "100.64.7.7"   # public: not listed
     ev = []
     for d in range(days):
         for h in range(400):
@@ -86,7 +87,7 @@ def run_cgnat(scenario, seed, fixed, days=3, inspect_every=300.0):
         for i, prod in enumerate(rng.sample(range(1, 3001), 3000)):
             ev.append((t, f"Mozilla/5.0 build-{i % n_ua}", prod, "bot", "bot"))
             t += rng.uniform(20, 40)
-    for i, prod in enumerate(rng.sample(range(1, 3001), 0 if scenario in ("cgnat_quiet",) or scenario.startswith("rotator") else 400)):
+    for i, prod in enumerate(rng.sample(range(1, 3001), 0 if scenario in ("cgnat_quiet", "cgnat_public_quiet") or scenario.startswith("rotator") else 400)):
         ev.append((t, bot_ua, prod, "bot", "bot"))     # a patient copier: 400 products over 10 h
         t += rng.uniform(60, 120)
     ev.sort(key=lambda e: e[0])
@@ -218,7 +219,7 @@ def run_token_frame(seed, fixed):
 
 
 EXTRA_ENV = {}
-SCENARIOS = ["second_opinion", "cgnat", "cgnat_framing", "cgnat_quiet", "rotator25", "rotator400", "rotator_cgnat", "latency_tell", "token_frame"]
+SCENARIOS = ["second_opinion", "cgnat", "cgnat_framing", "cgnat_quiet", "cgnat_public", "cgnat_public_quiet", "rotator25", "rotator400", "rotator_cgnat", "latency_tell", "token_frame"]
 
 
 def run(scenario, seed, fixed):

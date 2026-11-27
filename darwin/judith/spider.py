@@ -338,8 +338,10 @@ class Spider:
                 flag["seal"] = [subject]               # machine signatures seal the address, crowd or not (A2)
             elif rule == "breadth":
                 flag["seal"] = [subject] if "|" in subject else self._seal_subjects(subject)
-            elif rule == "many_identities" and self.crowd_address(subject):
-                flag["seal"] = []                      # a crowd (CGNAT) shows many browsers: flag for people only
+            elif rule == "many_identities":
+                flag["seal"] = []                      # many browsers on one address is what a crowd looks like
+                                                       # too: flag for people only (review B1). A UA rotator
+                                                       # still trips breadth, which seals a non-crowd address.
             self.flags.append(flag)
             new.append(flag)
             if self.flag_log:
@@ -351,15 +353,18 @@ class Spider:
 
     def crowd_address(self, address):
         """May this address be a crowd (many people behind one address)? Decided from evidence about the
-        address, not from its User-Agent count (analyst A5): the shared address space carriers use for
-        CGNAT (100.64.0.0/10) by default, plus whatever the owner lists in SPIDER_CROWD_NETS (carrier
-        ranges, the office network), or every address with SPIDER_CROWD_ALERT=on."""
+        address, not from its User-Agent count (analyst A5): whatever the owner lists in SPIDER_CROWD_NETS
+        (default 100.64.0.0/10, the CGNAT space, which a public server only sees behind a proxy or on a
+        carrier's own network: on the open internet carriers' public ranges must be listed, review B2), or
+        every address with SPIDER_CROWD_ALERT=on."""
         if self.policy.crowd_alert:
             return True
         try:
-            ip = ipaddress.ip_address(address)
+            ip = ipaddress.ip_address(address.split("%", 1)[0])
         except ValueError:
             return False
+        if ip.version == 6 and ip.ipv4_mapped:     # dual-stack listeners report ::ffff:a.b.c.d (review B3)
+            ip = ip.ipv4_mapped
         return any(ip in net for net in self.policy.crowd_nets)
 
     def _seal_subjects(self, address):

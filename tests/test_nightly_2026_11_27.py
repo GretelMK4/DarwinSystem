@@ -171,6 +171,7 @@ def test_spider_seal_expires_in_the_real_shop_and_fakes_stay_consistent(monkeypa
     import time
     monkeypatch.setattr(shop, "SPIDER_MODE", "seal")
     monkeypatch.setattr(shop, "SPIDER_SEALED", {})
+    monkeypatch.setattr(shop, "FAKE_SEEN", {})
     monkeypatch.setitem(shop.STATE, "lockdown_at", None)
     monkeypatch.setattr(shop, "TRIGGERS", [])
     sp = Spider(Policy({"SPIDER_SEAL_TTL": "1"}))
@@ -192,6 +193,13 @@ def test_spider_seal_expires_in_the_real_shop_and_fakes_stay_consistent(monkeypa
         time.sleep(1.2)
         assert get("/shop/item/1502")[1] == shop.item_page(1502)          # seal ran out: real again
         assert get("/shop/item/1501")[1] != shop.item_page(1501)          # ... but 1501 stays as it was seen
+        assert get("/shop/item/1501", "another-browser")[1] != shop.item_page(1501)   # by any browser (B4)
+        assert get("/backup/db/users_2024.sql", "Mozilla/5.0 (household-77)")[0] == 200
+        shop.SPIDER_SEALED["127.0.0.1"] = time.time() + 0.3                 # B5: spider seal, then a pitcher
+        get("/shop/item/1600", "Mozilla/5.0 (household-88)")                # ... seal starts (spider)
+        get("/backup/db/users_2024.sql", "Mozilla/5.0 (household-88)")      # ... then real bait evidence
+        time.sleep(0.5)
+        assert shop.CLIENTS["127.0.0.1|Mozilla/5.0 (household-88)"]["sealed_at"] is not None
         shop.SPIDER_SEALED["127.0.0.1"] = time.time() + 5.0
         assert get("/nope/xyz")[0] == 404                                  # sealed: same 404 as anyone
     finally:
@@ -214,3 +222,22 @@ def test_crowd_mode_only_where_the_address_is_known_to_be_shared():
     sp = Spider(Policy({}))
     assert sp.crowd_address("100.64.7.7") and not sp.crowd_address("203.0.113.5")
     assert not sp.crowd_address("not-an-ip")
+
+
+def test_many_identities_never_seals_on_its_own():
+    """Review B1: 25 browsers viewing one product each from a public address is a people-only signal."""
+    s = Spider(Policy({}))
+    for i in range(25):
+        s.observe("203.0.113.7", f"browser-{i}", 1 + i * 97, i * 60.0)
+    flags = s.inspect(now=2000)
+    assert [f["rule"] for f in flags] == ["many_identities"] and flags[0]["seal"] == []
+
+
+def test_ipv4_mapped_carrier_address_is_a_crowd():
+    sp = Spider(Policy({}))
+    assert sp.crowd_address("::ffff:100.64.0.1") and not sp.crowd_address("::ffff:203.0.113.5")
+
+
+def test_cgnat_on_a_public_carrier_address_is_still_protected_from_many_identities():
+    from simulations.nightly import n20261127 as night
+    assert night.run("cgnat_public_quiet", 0, fixed=True)["household_fp_rate"] == 0
