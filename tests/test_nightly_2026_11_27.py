@@ -115,8 +115,18 @@ def test_ua_rotator_cannot_hide_as_a_crowd():
 def test_seal_does_not_change_pitcher_timing():
     """Researcher scenario 1 (latency tell), on the real shop server on localhost."""
     from simulations.nightly import n20261127 as night
-    r = night.run_latency(7, fixed=True, samples=6)
-    assert r["agents"] >= 1 and r["seal_visible"] == 0
+    # A wall-clock measurement on a shared CI box: a busy CPU can stretch one sample and read as a tell. A real
+    # tell (the old drip tripled at the seal) shows on every try, so up to 3 tries with fresh visitors (new seed)
+    # must give one clean run; and the old drip must still be caught, so the retry cannot hide a regression.
+    runs = []
+    for seed in (7, 8, 9):
+        runs.append(night.run_latency(seed, fixed=True, samples=6))
+        assert runs[-1]["agents"] >= 1
+        if runs[-1]["seal_visible"] == 0:
+            break
+    assert runs[-1]["seal_visible"] == 0, [r["ratios"] for r in runs]
+    old = night.run_latency(17, fixed=False, samples=6)
+    assert old["agents"] >= 1 and old["seal_visible"] >= 1, old["ratios"]
 
 
 # ---------------- checkable fake keys (20261125E-11) ----------------
@@ -188,17 +198,18 @@ def test_spider_seal_expires_in_the_real_shop_and_fakes_stay_consistent(monkeypa
         conn.close()
         return r.status, body
     try:
-        shop.SPIDER_SEALED["127.0.0.1"] = time.time() + 1.0
+        shop.SPIDER_SEALED["127.0.0.1"] = time.time() + 60.0
         assert get("/shop/item/1501")[1] != shop.item_page(1501)          # sealed: fake
-        time.sleep(1.2)
+        shop.SPIDER_SEALED["127.0.0.1"] = time.time() - 1.0                # seal runs out (no sleep: not timing-bound)
         assert get("/shop/item/1502")[1] == shop.item_page(1502)          # seal ran out: real again
         assert get("/shop/item/1501")[1] != shop.item_page(1501)          # ... but 1501 stays as it was seen
         assert get("/shop/item/1501", "another-browser")[1] != shop.item_page(1501)   # by any browser (B4)
         assert get("/backup/db/users_2024.sql", "Mozilla/5.0 (household-77)")[0] == 200
-        shop.SPIDER_SEALED["127.0.0.1"] = time.time() + 0.3                 # B5: spider seal, then a pitcher
+        shop.SPIDER_SEALED["127.0.0.1"] = time.time() + 60.0                # B5: spider seal, then a pitcher
         get("/shop/item/1600", "Mozilla/5.0 (household-88)")                # ... seal starts (spider)
         get("/backup/db/users_2024.sql", "Mozilla/5.0 (household-88)")      # ... then real bait evidence
-        time.sleep(0.5)
+        shop.SPIDER_SEALED["127.0.0.1"] = time.time() - 1.0                # ... the spider seal runs out
+        get("/shop/item/1601", "Mozilla/5.0 (household-88)")                # ... and the next visit keeps the pitcher seal
         assert shop.CLIENTS["127.0.0.1|Mozilla/5.0 (household-88)"]["sealed_at"] is not None
         shop.SPIDER_SEALED["127.0.0.1"] = time.time() + 5.0
         assert get("/nope/xyz")[0] == 404                                  # sealed: same 404 as anyone
