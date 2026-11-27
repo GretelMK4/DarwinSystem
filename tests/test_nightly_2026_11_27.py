@@ -49,11 +49,11 @@ def _carrier(s, t=0.0, households=60, uas=60):
 def test_attacker_on_a_carrier_address_is_sealed_alone():
     s = Spider(Policy({"SPIDER_METRONOME_CV": "0"}))
     t = _carrier(s)
-    for i in range(160):                                   # one copier behind the same carrier address
+    for i in range(160):                                   # one copier behind the same carrier address, alone over BREADTH
         t += 41 + i % 9
         s.observe("100.64.0.1", "python-requests/2.32", 3000 - i, t)
-    flags = [f for f in s.inspect(now=t) if f["rule"] == "breadth"]
-    assert flags and flags[0]["seal"] == ["100.64.0.1|python-requests/2.32"]
+    seals = sorted(x for f in s.inspect(now=t) for x in f.get("seal", []))
+    assert seals == ["100.64.0.1|python-requests/2.32"]                 # the crowd itself is flagged, not sealed
 
 
 def test_ua_rotation_on_one_address_still_seals_the_address():
@@ -76,3 +76,18 @@ def test_spider_seal_expires_and_can_be_raised_again(monkeypatch):
     assert not shop.spider_sealed("10.9.9.9", "10.9.9.9|UA", 1200 + 3601)        # 6 h by default, 1 h here
     assert sp.inspect(now=1250) == []                                              # not raised twice ...
     assert [f["rule"] for f in sp.inspect(now=1200 + 3601)] == ["breadth"]         # ... until the seal ran out
+
+
+def test_crowd_address_without_a_copier_is_not_sealed():
+    s = Spider(Policy({"SPIDER_METRONOME_CV": "0"}))
+    t = _carrier(s, households=80)
+    assert all(not f.get("seal") for f in s.inspect(now=t))
+
+
+def test_cgnat_households_are_spared_and_the_copier_capped():
+    from simulations.nightly import n20261127 as night
+    before, after = night.run("cgnat", 0, fixed=False), night.run("cgnat", 0, fixed=True)
+    assert before["household_fp_rate"] > 0.5                     # release: the whole carrier sees fakes
+    assert after["household_fp_rate"] < 0.1 and after["bot_products_stolen"] <= 160
+    assert night.run("cgnat_quiet", 0, fixed=True)["household_fp_rate"] == 0
+    assert night.run("second_opinion", 0, fixed=True)["detected_offline"] == 0
