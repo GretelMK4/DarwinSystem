@@ -112,6 +112,12 @@ class Policy:
         self.cusum_h = get("FLEET_CUSUM_H", 0.0)           # ... and trip level, in reference sd (0 = off;
                                                            # 8 caught a slow swarm in the lab, but with
                                                            # fakes as the guard action it cost shoppers)
+        self.seal_ttl = get("SEAL_TTL", 21600)             # how long Judith keeps a Spider seal; the same
+                                                           # flag may be raised again after this long
+        self.shared_uas = get("SHARED_UAS", 4, int)        # an address showing this many User-Agents is
+                                                           # treated as shared (office, mobile carrier)
+        self.shared_min = get("SHARED_MIN", 20, int)       # on a shared address, seal only the identities
+                                                           # (address|UA) that opened more products than this
         self.fleet_sticky = get("FLEET_STICKY", 0)         # a product shadowed by the guard stays shadowed
                                                            # for cold visitors this long (0 = off)
 
@@ -122,7 +128,7 @@ class Spider:
         self.flag_log = flag_log               # path of a JSON-lines file for people, or None
         self.on_flag = on_flag                 # callback(flag) for the owner's chosen response
         self.flags = []
-        self._flagged = set()                  # (subject, rule) already raised
+        self._flagged = {}                     # (subject, rule) -> when it was last raised
         self._views = collections.defaultdict(collections.deque)    # address -> deque of (t, product)
         self._identities = collections.defaultdict(set)             # address -> User-Agents seen
         self._fingerprints = {}                # path -> sha256 at start-up
@@ -149,7 +155,7 @@ class Spider:
         with self._lock:
             if self.policy.fleet:
                 self._fleet_observe(address, product, t, shadowed)
-            self._views[address].append((t, product))
+            self._views[address].append((t, product, user_agent))
             ids = self._identities[address]
             if len(ids) <= self.policy.max_identities:
                 ids.add(user_agent)
@@ -268,7 +274,7 @@ class Spider:
             for address, views in self._views.items():
                 while views and now - views[0][0] > p.window:
                     views.popleft()
-                products = {n for _, n in views}
+                products = {v[1] for v in views}
                 if len(products) > p.breadth:
                     found.append((address, "breadth",
                                   f"{len(products)} different products viewed (approved: up to {p.breadth})"))
@@ -297,10 +303,13 @@ class Spider:
                 found.append((path, "component_changed", "file no longer matches its start-up fingerprint"))
         new = []
         for subject, rule, evidence in found:
-            if (subject, rule) in self._flagged and rule != "fleet_tail":
+            last = self._flagged.get((subject, rule))
+            if last is not None and rule != "fleet_tail" and now - last < p.seal_ttl:
                 continue
-            self._flagged.add((subject, rule))
+            self._flagged[(subject, rule)] = now
             flag = {"t": now, "subject": subject, "rule": rule, "evidence": evidence}
+            if rule in ("breadth", "enumeration", "metronome"):
+                flag["seal"] = self._seal_subjects(subject)
             self.flags.append(flag)
             new.append(flag)
             if self.flag_log:
@@ -309,6 +318,26 @@ class Spider:
             if self.on_flag:
                 self.on_flag(flag)
         return new
+
+    def _seal_subjects(self, address):
+        """Who a per-address flag should seal. Usually the address. On a shared address (many
+        User-Agents: an office, a mobile carrier's CGNAT) sealing the address shows fakes to every
+        person behind it, and lets an attacker frame it (Nov 25 findings 20261125-3/-4). There only the
+        identities (address|UA) that did a real part of the work are sealed. When no identity stands
+        out, the address is sealed as before. Every Spider seal lasts SEAL_TTL."""
+        p = self.policy
+        with self._lock:
+            views = list(self._views.get(address, ()))
+        uas = {v[2] for v in views}
+        if len(uas) < p.shared_uas:
+            return [address]
+        per = collections.defaultdict(set)
+        for _, product, ua in views:
+            per[ua].add(product)
+        heavy = [f"{address}|{ua}" for ua, prods in sorted(per.items()) if len(prods) > p.shared_min]
+        # nobody stands out: the work was spread evenly over many User-Agents, which is what a UA-rotating
+        # copier does (Nov 25 warning 20261125-7), so the address is sealed as before, for SEAL_TTL
+        return heavy or [address]
 
     # ---------- running ----------
 

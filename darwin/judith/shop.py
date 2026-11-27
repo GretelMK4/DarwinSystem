@@ -176,7 +176,7 @@ INTEL_REJECTED = collections.Counter()
 CRAWLERS = crawlers.CrawlerVerifier()
 SPIDER_MODE = os.environ.get("SPIDER", "seal")        # seal (default) | alert | off
 SPIDER = None                                         # the Spider object, created in main()
-SPIDER_SEALED = set()                                 # addresses the Spider flagged (seal mode)
+SPIDER_SEALED = {}                                    # address or address|UA -> sealed until (seal mode)
 SPIDER_FLAGS = []                                     # what it has raised, for the stats port
 RELEASES = MODE in ("single", "multi") or LOCKDOWN_MODE
 
@@ -461,7 +461,7 @@ class Handler(QuietHandler):
                 if len(NEW_CAT) >= SURGE_N and t0 - SURGE_STATE["last"] > 1:
                     SURGE_STATE["last"] = t0
                     note_trigger("surge", t0, client)
-            if self.client_address[0] in SPIDER_SEALED and not c["sealed_at"]:
+            if not c["sealed_at"] and spider_sealed(self.client_address[0], client, t0):
                 note_trigger("spider", t0, client)                    # flagged by the internal watcher
                 seal(c, client, "spider", t0)
             if INTEL_ON and not c["sealed_at"]:
@@ -754,7 +754,21 @@ def spider_flag(flag):
                              "evidence": flag["evidence"], "real_products_held_when_flagged": len(held)})
         event("SPIDER_FLAG", subject, f"{flag['rule']}: {flag['evidence']}")
         if SPIDER_MODE == "seal" and flag["rule"] not in ("component_changed", "fleet_tail"):
-            SPIDER_SEALED.add(subject)
+            until = flag["t"] + SPIDER.policy.seal_ttl if SPIDER is not None else float("inf")
+            for who in flag.get("seal", [subject]):
+                SPIDER_SEALED[who] = max(SPIDER_SEALED.get(who, 0.0), until)
+
+
+def spider_sealed(address, client, now):
+    """Is this visitor under a Spider seal? Seals expire after SPIDER_SEAL_TTL (Nov 25 finding
+    20261125-8: a Spider seal used to last forever, so a carrier address stayed in the shadow for good)."""
+    for who in (address, client):
+        until = SPIDER_SEALED.get(who)
+        if until is not None:
+            if now < until:
+                return True
+            del SPIDER_SEALED[who]
+    return False
 
 
 def start_spider(flag_log=None):
