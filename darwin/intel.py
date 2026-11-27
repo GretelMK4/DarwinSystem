@@ -90,6 +90,41 @@ def sign(payload: dict, key: bytes, sender: str = "hercules", now: float = None,
     return env
 
 
+# ---------- fake keys a receiver can check (2026-11-27, finding 20261125E-11) ----------
+#
+# A plant reports the fake keys it handed out, and Judith seals whoever uses one. A compromised plant could
+# report a REAL customer's API key and have that customer sealed on its word alone. So a plant mints its fake
+# keys as <random part><tag>, where tag = HMAC(token key, random part), the token key being derived from the
+# plant's own intel key. A receiver accepts a reported token only if its tag checks out under the sender's
+# key. Real keys are random, so a compromised plant cannot make one of them check out.
+
+TOKEN_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+TOKEN_RAND, TOKEN_TAG = 16, 12
+
+
+def _token_key(key: bytes) -> bytes:
+    return hmac.new(key, b"darwin-token-v1", hashlib.sha256).digest()
+
+
+def _tag(key: bytes, rand: str) -> str:
+    digest = hmac.new(_token_key(key), rand.encode(), hashlib.sha256).digest()
+    return "".join(TOKEN_ALPHABET[b % len(TOKEN_ALPHABET)] for b in digest[:TOKEN_TAG])
+
+
+def mint_token(key: bytes, r) -> str:
+    """A 28-character fake key in the usual alphanumeric shape, checkable by whoever holds `key`.
+    `r` is a random.Random (so a plant's pages stay deterministic)."""
+    rand = "".join(r.choice(TOKEN_ALPHABET) for _ in range(TOKEN_RAND))
+    return rand + _tag(key, rand)
+
+
+def token_ok(key: bytes, token: str) -> bool:
+    """Did the holder of `key` mint this token?"""
+    if not isinstance(token, str) or len(token) != TOKEN_RAND + TOKEN_TAG:
+        return False
+    return hmac.compare_digest(token[TOKEN_RAND:], _tag(key, token[:TOKEN_RAND]))
+
+
 class Verifier:
     """Checks envelopes and remembers recent nonces so a captured message cannot be replayed."""
 

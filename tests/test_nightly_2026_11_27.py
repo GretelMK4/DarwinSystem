@@ -105,3 +105,32 @@ def test_seal_does_not_change_pitcher_timing():
     from simulations.nightly import n20261127 as night
     r = night.run_latency(7, fixed=True, samples=6)
     assert r["agents"] >= 1 and r["seal_visible"] == 0
+
+
+# ---------------- checkable fake keys (20261125E-11) ----------------
+
+def test_minted_tokens_check_only_under_their_key():
+    from darwin import intel
+    k1, k2 = intel.new_key().encode(), intel.new_key().encode()
+    t = intel.mint_token(k1, random.Random(3))
+    assert len(t) == 28 and t.isalnum()
+    assert intel.token_ok(k1, t) and not intel.token_ok(k2, t)
+    assert not intel.token_ok(k1, t[:-1] + ("A" if t[-1] != "A" else "B"))
+    assert not intel.token_ok(k1, "x" * 28) and not intel.token_ok(k1, None)
+
+
+def test_honeyfarm_mints_checkable_keys_when_given_one():
+    from darwin import intel
+    from darwin.hercules import honeyfarm
+    key = intel.new_key().encode()
+    farm = honeyfarm.Hercules(1, diverse=True, seed=2, token_key=key)
+    text = farm.dotenv(farm.sites[0])
+    tok = text.split("sk_live_", 1)[1].split()[0]
+    assert intel.token_ok(key, tok)
+
+
+def test_compromised_plant_cannot_get_real_customer_keys_sealed():
+    from simulations.nightly import n20261127 as night
+    assert night.run("token_frame", 0, fixed=False)["real_customer_keys_accepted"] == 500
+    r = night.run("token_frame", 0, fixed=True)
+    assert r["real_customer_keys_accepted"] == 0 and r["honest_fake_keys_accepted"] == 100

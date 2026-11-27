@@ -12,6 +12,7 @@ shop's spider_flag / spider_sealed decision) with simulated visitors.
   rotator25/400   one dedicated address copies the whole catalog, rotating 25 or 400 User-Agents
   latency_tell    researcher scenario 1: time a pitcher page before and after the sealing request
                   (runs Judith's real shop on a localhost port of this process)
+  token_frame     a compromised Hercules reports real customers' API keys as its fake keys
   cgnat_framing   the same, but the copier uses the most common household browser string, so
                   its identity overlaps real people (20261125-4)
 
@@ -172,11 +173,49 @@ def run_latency(seed, fixed, samples=12):
     return out
 
 
+def run_token_frame(seed, fixed):
+    """Analyst finding 20261125E-11 (Nov 25 evening): a compromised Hercules reports 500 real customers' API
+    keys as 'fake keys it handed out', so Judith would seal whoever uses them. An honest Hercules reports 100
+    fake keys it really issued. Goes through the shop's real intel intake (Admin.take_intel)."""
+    import io
+    from darwin import intel
+    rng = random.Random(seed)
+    keys = {"hercules-1": intel.new_key().encode(), "hercules-2": intel.new_key().encode()}
+    old = (shop.INTEL_VERIFIER, shop.INTEL_TOKENS, shop.INTEL_IDS, shop.INTEL_TOKEN_CHECK, shop.INTEL_ON)
+    shop.INTEL_ON = True
+    shop.INTEL_VERIFIER = intel.Verifier(keys=keys, me="judith")
+    shop.INTEL_TOKENS = intel.IntelStore(quorum=1)
+    shop.INTEL_IDS = intel.IntelStore(quorum=2)
+    shop.INTEL_TOKEN_CHECK = fixed
+    real = ["".join(rng.choice(intel.TOKEN_ALPHABET) for _ in range(28)) for _ in range(500)]
+    mint = (lambda r: intel.mint_token(keys["hercules-2"], r)) if fixed else (lambda r: shop.ts.tok(r, 28))
+    honest = [mint(rng) for _ in range(100)]
+
+    class Fake:
+        def __init__(self, env):
+            data = json.dumps(env).encode()
+            self.headers = {"Content-Length": str(len(data))}
+            self.path = "/intel"
+            self.rfile = io.BytesIO(data)
+    try:
+        shop.Admin.take_intel(Fake(intel.sign({"tokens": real}, keys["hercules-1"], sender="hercules-1", to="judith")))
+        shop.Admin.take_intel(Fake(intel.sign({"tokens": honest}, keys["hercules-2"], sender="hercules-2", to="judith")))
+        framed = sum(t in shop.INTEL_TOKENS for t in real)
+        caught = sum(t in shop.INTEL_TOKENS for t in honest)
+    finally:
+        shop.INTEL_VERIFIER, shop.INTEL_TOKENS, shop.INTEL_IDS, shop.INTEL_TOKEN_CHECK, shop.INTEL_ON = old
+    return {"scenario": "token_frame", "seed": seed, "fixed": fixed,
+            "real_customer_keys_accepted": framed, "real_customer_keys": len(real),
+            "honest_fake_keys_accepted": caught, "honest_fake_keys": len(honest)}
+
+
 EXTRA_ENV = {}
-SCENARIOS = ["second_opinion", "cgnat", "cgnat_framing", "cgnat_quiet", "rotator25", "rotator400", "latency_tell"]
+SCENARIOS = ["second_opinion", "cgnat", "cgnat_framing", "cgnat_quiet", "rotator25", "rotator400", "latency_tell", "token_frame"]
 
 
 def run(scenario, seed, fixed):
+    if scenario == "token_frame":
+        return run_token_frame(seed, fixed)
     if scenario == "latency_tell":
         return run_latency(seed, fixed)
     if scenario == "second_opinion":

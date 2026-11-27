@@ -173,6 +173,8 @@ INTEL_ME = os.environ.get("INTEL_ME") or None              # this receiver's nam
                                                            # messages addressed to another receiver
 INTEL_MAX = 200_000                                   # most identities / keys remembered per sender
 INTEL_IDS = intel.IntelStore(quorum=INTEL_QUORUM, ttl=INTEL_TTL, per_sender=INTEL_MAX)
+INTEL_TOKEN_CHECK = os.environ.get("INTEL_TOKEN_CHECK", "on") == "on"   # with per-plant keys, accept only
+                                                                         # checkable fake keys (intel.token_ok)
 INTEL_TOKENS = intel.IntelStore(quorum=1, ttl=INTEL_TTL, per_sender=INTEL_MAX)   # a fake key is ours: one
                                                                                  # plant seeing it used is proof
 INTEL_VERIFIER = None                                 # set in main() when INTEL=on
@@ -731,6 +733,11 @@ class Admin(QuietHandler):
         sender = env["sender"]                                         # verified: bound to its key
         ids = [x[:MAX_UA + 64] for x in d.get("identities", []) if isinstance(x, str)]
         toks = [x for x in d.get("tokens", []) if isinstance(x, str) and len(x) <= 128]
+        key = INTEL_VERIFIER.keys.get(sender)
+        if key is not None and INTEL_TOKEN_CHECK:
+            # per-plant keys: only fake keys this plant provably minted (20261125E-11), so a compromised
+            # plant cannot get a real customer's API key sealed
+            toks = [x for x in toks if intel.token_ok(key, x)]
         with LOCK:
             INTEL_IDS.add(sender, ids)             # capped per message and per sender; expires after INTEL_TTL
             INTEL_TOKENS.add(sender, toks)
