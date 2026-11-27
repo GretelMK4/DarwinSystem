@@ -91,3 +91,10 @@ def test_cgnat_households_are_spared_and_the_copier_capped():
     assert after["household_fp_rate"] < 0.1 and after["bot_products_stolen"] <= 160
     assert night.run("cgnat_quiet", 0, fixed=True)["household_fp_rate"] == 0
     assert night.run("second_opinion", 0, fixed=True)["detected_offline"] == 0
+
+
+def test_ua_rotator_cannot_hide_as_a_crowd():
+    from simulations.nightly import n20261127 as night
+    assert night.run("rotator400", 0, fixed=False)["bot_products_stolen"] <= 160   # release: sealed at BREADTH
+    r = night.run("rotator400", 0, fixed=True)
+    assert r["address_sealed"] and r["bot_products_stolen"] <= 620                # bounded by CROWD_BREADTH

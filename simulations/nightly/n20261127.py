@@ -9,6 +9,7 @@ shop's spider_flag / spider_sealed decision) with simulated visitors.
   cgnat           one mobile-carrier address: 400 households a day, each with its own browser
                   build, plus one patient copier on the same address (20261125-3, -8)
   cgnat_quiet     the households only (false positives)
+  rotator25/400   one dedicated address copies the whole catalog, rotating 25 or 400 User-Agents
   cgnat_framing   the same, but the copier uses the most common household browser string, so
                   its identity overlaps real people (20261125-4)
 
@@ -71,8 +72,15 @@ def run_cgnat(scenario, seed, fixed, days=3, inspect_every=300.0):
                 t += rng.lognormvariate(math.log(35), 0.6)
     bot_ua = "Mozilla/5.0 (Android 15) Chrome/131.0.1" if scenario == "cgnat_framing" else "Mozilla/5.0 (X11) Chrome/130"
     t = DAY + 9 * 3600
-    for i, prod in enumerate(rng.sample(range(1, 3001), 0 if scenario == "cgnat_quiet" else 400)):    # a patient copier: 400 products over 10 h
-        ev.append((t, bot_ua, prod, "bot", "bot"))
+    if scenario.startswith("rotator"):
+        # a dedicated address (no households) whose copier rotates User-Agents to look like a crowd
+        ev = []
+        n_ua = 25 if scenario == "rotator25" else 400
+        for i, prod in enumerate(rng.sample(range(1, 3001), 3000)):
+            ev.append((t, f"Mozilla/5.0 build-{i % n_ua}", prod, "bot", "bot"))
+            t += rng.uniform(20, 40)
+    for i, prod in enumerate(rng.sample(range(1, 3001), 0 if scenario in ("cgnat_quiet",) or scenario.startswith("rotator") else 400)):
+        ev.append((t, bot_ua, prod, "bot", "bot"))     # a patient copier: 400 products over 10 h
         t += rng.uniform(60, 120)
     ev.sort(key=lambda e: e[0])
     nxt, flagged_at, rules = inspect_every, None, {}
@@ -80,7 +88,7 @@ def run_cgnat(scenario, seed, fixed, days=3, inspect_every=300.0):
     for t, ua, prod, kind, who in ev:
         while t >= nxt:
             for f in sp.inspect(now=nxt):
-                if f["rule"] in ("breadth", "enumeration", "metronome", "many_identities"):
+                if f["rule"] in ("breadth", "enumeration", "metronome", "many_identities", "crowd_breadth"):
                     rules[f["rule"]] = rules.get(f["rule"], 0) + 1
                     if any(x.endswith("|" + bot_ua) for x in f.get("seal", [])) or (
                             f.get("seal", [f["subject"]]) == [addr] and t > DAY + 9 * 3600):
@@ -100,24 +108,25 @@ def run_cgnat(scenario, seed, fixed, days=3, inspect_every=300.0):
                 bot_fake += 1
             else:
                 stolen.add(prod)
-    hh = len({e[4] for e in ev if e[3] == "household"})
+    hh = max(1, len({e[4] for e in ev if e[3] == "household"}))
     return {"scenario": scenario, "seed": seed, "fixed": fixed,
             "households": hh, "households_shown_fakes": len(hh_hit),
             "household_fp_rate": round(len(hh_hit) / hh, 4), "household_fake_pages": hh_fake,
             "household_views": hh_views, "bot_products_stolen": len(stolen), "bot_fakes": bot_fake,
             "copier_flagged_after_s": round(flagged_at - (DAY + 9 * 3600)) if flagged_at else None,
             "flags_by_rule": rules, "sealed_subjects": len(sealed),
-            "copier_identity_sealed": any(k.endswith("|" + bot_ua) for k in sealed) or addr in sealed}
+            "copier_identity_sealed": any(k.endswith("|" + bot_ua) for k in sealed) or addr in sealed,
+            "address_sealed": addr in sealed}
 
 
 EXTRA_ENV = {}
-SCENARIOS = ["second_opinion", "cgnat", "cgnat_framing", "cgnat_quiet"]
+SCENARIOS = ["second_opinion", "cgnat", "cgnat_framing", "cgnat_quiet", "rotator25", "rotator400"]
 
 
 def run(scenario, seed, fixed):
     if scenario == "second_opinion":
         return run_second_opinion(seed, fixed)
-    if scenario.startswith("cgnat"):
+    if scenario.startswith(("cgnat", "rotator")):
         return run_cgnat(scenario, seed, fixed)
     raise SystemExit(f"unknown scenario {scenario}")
 

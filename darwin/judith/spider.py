@@ -119,6 +119,8 @@ class Policy:
         self.shared_min = get("SHARED_MIN", 0, int)        # on a shared address, an identity (address|UA)
                                                            # that alone opened more products than this is
                                                            # flagged and sealed (0 = same as BREADTH)
+        self.crowd_breadth = get("CROWD_BREADTH", 600, int)    # a crowd address is sealed after all
+                                                           # past this many different products per window
         self.crowd_alert = environ.get("SPIDER_CROWD_ALERT", "on") == "on"   # a crowd address (more than
                                                            # MAX_IDENTITIES browsers) is flagged, not sealed
         self.fleet_sticky = get("FLEET_STICKY", 0)         # a product shadowed by the guard stays shadowed
@@ -281,6 +283,11 @@ class Spider:
                 if len(products) > p.breadth:
                     found.append((address, "breadth",
                                   f"{len(products)} different products viewed (approved: up to {p.breadth})"))
+                    if len(products) > p.crowd_breadth:
+                        # even a crowd is bounded: an address that rotates many User-Agents to pass as one
+                        # would otherwise copy the whole catalog (lab 2026-11-27, rotator25/400: 100% stolen)
+                        found.append((address, "crowd_breadth", f"{len(products)} different products from one "
+                                      f"address, even counting it as a crowd (approved: up to {p.crowd_breadth})"))
                     uas = {v[2] for v in views}
                     if len(uas) >= p.shared_uas:              # shared address: judge each browser on its own
                         per = collections.defaultdict(set)
@@ -321,7 +328,9 @@ class Spider:
                 continue
             self._flagged[(subject, rule)] = now
             flag = {"t": now, "subject": subject, "rule": rule, "evidence": evidence}
-            if rule in ("breadth", "enumeration", "metronome"):
+            if rule == "crowd_breadth":
+                flag["seal"] = [subject]
+            elif rule in ("breadth", "enumeration", "metronome"):
                 flag["seal"] = [subject] if "|" in subject else self._seal_subjects(subject)
             elif rule == "many_identities" and p.crowd_alert:
                 flag["seal"] = []                      # a crowd (CGNAT) shows many browsers: flag for people only
@@ -352,7 +361,7 @@ class Spider:
         # than MAX_IDENTITIES browsers, as behind a carrier's CGNAT) is flagged for people only when
         # SPIDER_CROWD_ALERT is on, because sealing it shows fakes to every household behind it.
         if p.crowd_alert and len(uas) > p.max_identities:
-            return []
+            return []                      # bounded by the crowd_breadth rule instead
         return [address]
 
     # ---------- running ----------
