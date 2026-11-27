@@ -863,6 +863,11 @@ def main():
             sys.exit(f"INTEL=on but {e}")
     if SPIDER_MODE in ("alert", "seal"):
         start_spider(os.environ.get("SPIDER_LOG", results_path("spider_flags.jsonl")))
+    if SPIDER is not None and HOST not in ("127.0.0.1", "localhost", "::1") and \
+            [str(n) for n in SPIDER.policy.crowd_nets] == ["100.64.0.0/10"] and not SPIDER.policy.crowd_alert:
+        print("NOTE: SPIDER_CROWD_NETS lists only 100.64.0.0/10. On the open internet carriers' CGNAT users "
+              "arrive from the carriers' PUBLIC ranges, so list those (and your offices) in SPIDER_CROWD_NETS, "
+              "or many people behind one address can be sealed together.", file=sys.stderr)
     if HOST not in ("127.0.0.1", "localhost", "::1"):
         print(f"WARNING: binding to {HOST}. This is a research prototype; see the limits in README.md "
               "before exposing it to a network.", file=sys.stderr)
