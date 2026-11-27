@@ -121,7 +121,8 @@ class Policy:
                                                            # flagged and sealed (0 = same as BREADTH)
         self.crowd_breadth = get("CROWD_BREADTH", 600, int)    # a crowd address is sealed after all
                                                            # past this many different products per window
-        self.crowd_alert = environ.get("SPIDER_CROWD_ALERT", "on") == "on"   # a crowd address (more than
+        self.crowd_alert = environ.get("SPIDER_CROWD_ALERT", "off") == "on"   # off by default (analyst A2/A5:
+                                                           # UA count cannot tell a crowd from a rotator)   # a crowd address (more than
                                                            # MAX_IDENTITIES browsers) is flagged, not sealed
         self.fleet_sticky = get("FLEET_STICKY", 0)         # a product shadowed by the guard stays shadowed
                                                            # for cold visitors this long (0 = off)
@@ -330,7 +331,9 @@ class Spider:
             flag = {"t": now, "subject": subject, "rule": rule, "evidence": evidence}
             if rule == "crowd_breadth":
                 flag["seal"] = [subject]
-            elif rule in ("breadth", "enumeration", "metronome"):
+            elif rule in ("enumeration", "metronome"):
+                flag["seal"] = [subject]               # machine signatures seal the address, crowd or not (A2)
+            elif rule == "breadth":
                 flag["seal"] = [subject] if "|" in subject else self._seal_subjects(subject)
             elif rule == "many_identities" and p.crowd_alert:
                 flag["seal"] = []                      # a crowd (CGNAT) shows many browsers: flag for people only

@@ -117,9 +117,11 @@ CATALOG = int(os.environ.get("CATALOG", "3000"))
 PER_PAGE = 10
 PAGES = (CATALOG + PER_PAGE - 1) // PER_PAGE
 DRIP = float(os.environ.get("DRIP", "0.01"))
-# Sealing must not change timing. The drip used to triple at the moment of the seal, so a visitor that timed
-# the same pitcher page before and after could see exactly which request sealed it (lab 2026-11-27, latency
-# tell). With DRIP_EVEN=on (default) the slow drip starts at a visitor's first pitcher request and stays.
+# Sealing must not change timing. The drip used to triple at the moment of the seal, and a sealed visitor got a
+# slow maze instead of the fast 404 on unknown paths, so timing one page before and after showed exactly which
+# request sealed it (lab 2026-11-27, latency tell, analyst A6). With DRIP_EVEN=on (default) the drip depends
+# only on the path's depth, and unknown paths are a plain 404 for everyone. (The drip itself still makes bait
+# routes slower than the real site; matching the real site's timing is a recommendation.)
 DRIP_EVEN = os.environ.get("DRIP_EVEN", "on") == "on"
 SEAL_DEPTH, GOLD_DEPTH, SCOUT_EVERY, RELEASE_AFTER = 2, 3, 4, 8.0
 ALARM_K = int(os.environ.get("ALARM_K", "3"))
@@ -216,21 +218,27 @@ def _load_shadow_secret(environ=os.environ):
     results/shadow_secret, so the fakes stay the same across restarts (a sealed visitor that comes back
     after a restart must not see a different fake)."""
     value = environ.get("DARWIN_SHADOW_SECRET")
-    if value:
+    if value is not None:
+        if len(value.encode()) < 32:
+            raise SystemExit("DARWIN_SHADOW_SECRET must be at least 32 bytes (a short one can be brute-forced "
+                             "from one known fake)")
         return value.encode()
-    path = results_path("shadow_secret")
-    try:
-        with open(path, "rb") as f:
-            secret = f.read().strip()
-        if len(secret) >= 16:
-            return secret
-    except OSError:
-        pass
+    path = environ.get("DARWIN_SHADOW_SECRET_FILE") or results_path("shadow_secret")
     secret = os.urandom(32).hex().encode()
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "wb") as f:
-        f.write(secret)
-    return secret
+    try:                                          # O_EXCL: workers starting together agree on one secret
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(secret)
+        return secret
+    except FileExistsError:
+        pass
+    for _ in range(50):                            # another worker may still be writing it
+        with open(path, "rb") as f:                # unreadable: fail closed rather than change the fakes
+            got = f.read().strip()
+        if len(got) >= 32:
+            return got
+        time.sleep(0.02)
+    raise SystemExit(f"shadow secret file {path} is shorter than 32 bytes; fix or remove it")
 
 
 SHADOW_SECRET = _load_shadow_secret()
@@ -467,6 +475,9 @@ class Handler(QuietHandler):
                 if len(NEW_CAT) >= SURGE_N and t0 - SURGE_STATE["last"] > 1:
                     SURGE_STATE["last"] = t0
                     note_trigger("surge", t0, client)
+            if c["sealed_at"] and c["trigger"] == "spider" and not spider_sealed(self.client_address[0], client, t0):
+                c["sealed_at"] = c["trigger"] = None          # the Spider seal ran out (analyst A1, 2026-11-27)
+                event("UNSEALED", client, "Spider seal expired")
             if not c["sealed_at"] and spider_sealed(self.client_address[0], client, t0):
                 note_trigger("spider", t0, client)                    # flagged by the internal watcher
                 seal(c, client, "spider", t0)
@@ -488,7 +499,6 @@ class Handler(QuietHandler):
                     event("BLOCKED_429", client, "over rate limit")
                 blocked = c["blocked"]
             if pit:
-                c["touched"] = True
                 trig = False
                 if LOCKDOWN_MODE and locked:
                     trig = True                                       # hair trigger
@@ -575,7 +585,7 @@ class Handler(QuietHandler):
             st, ct, body, kind = 200, "application/json", ts.gold_file(path), "gold"
         elif pit:
             kind = "pitcher"
-            drip = DRIP * (3 if sealed or (DRIP_EVEN and c.get("touched")) else 1 + depth / 2)
+            drip = DRIP * (1 + depth / 2) if DRIP_EVEN else DRIP * (3 if sealed else 1 + depth / 2)
             if path == "/.env":
                 st, ct, body = 200, "text/plain", ts.dotenv()
             elif pit == "api":
@@ -591,10 +601,14 @@ class Handler(QuietHandler):
             st, ct, body = static_page(path, query)
         elif path.startswith("/shop/item/") and item_id(path):
             n = item_id(path)
-            if sealed or fleet_guard:
+            if sealed or fleet_guard or n in c.get("fake_seen", ()):
+                # a product once served fake to this visitor stays fake for it, even after its seal ran out,
+                # so the same visitor never sees the fake and the real page of one product (analyst A7)
                 with LOCK:
                     real_ok = SHIELD and n in SHIELD_SET
-                if fleet_guard and not sealed:
+                if n in c.get("fake_seen", ()):
+                    body, kind = item_page(n, fake=True), "shadow_fake"
+                elif fleet_guard and not sealed:
                     SPIDER.note_shadow(n, t0)
                     body, kind = item_page(n, fake=True), "fleet_shadow"
                     with LOCK:
@@ -615,11 +629,14 @@ class Handler(QuietHandler):
                         c["prob_items"] += 1
                     if not is_human:
                         STOLEN.add(n)
+            if kind in ("shadow_fake", "fleet_shadow"):
+                with LOCK:
+                    c.setdefault("fake_seen", set()).add(n)
             st, ct = 200, "text/html"
-        elif sealed:
+        elif sealed and not DRIP_EVEN:
             kind, drip = "pitcher", DRIP * 3
             st, ct, body = 200, "text/html", ts.maze_listing(path if path.endswith("/") else path + "/")
-        else:
+        else:                                       # sealed or not, an unknown path is the same fast 404 (A6)
             st, ct, body = 404, "text/html", "<html><body>Not Found</body></html>"
 
         data = body.encode()

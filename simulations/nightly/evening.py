@@ -13,6 +13,8 @@ on this request -> shadow page, otherwise the real page):
   hydra_padded   each address first opens 3 popular products, then 3 tail ones
   hydra_padded10 the same with 10 popular products first (analyst F1)
   vantage_warm   vantage, but one long-lived control identity does all re-fetches (analyst F3)
+  notebook       (2026-11-27) a second cold swarm member opens each product 0-2 h after the first and the
+                 swarm's shared notes compare the two copies
   (hydra uses 1,000 addresses x 3 = the whole 3,000-product catalog; 2,000 x 3 asked for more
    products than exist, analyst artifact A1)
 Intel group (three Hercules, one compromised; Judith and Venus receive):
@@ -129,6 +131,11 @@ def run_spider(scenario, seed, fixed, days=4, inspect_every=600.0):
         ev += [(2 * DAY + 600 * k, "control-warm", "Mozilla/5.0 (Mac) Safari", 2 + k % 20, "warmup", 0) for k in range(10)]
         ev += [(t + rng.uniform(2, 12) * 3600, "control-warm", "Mozilla/5.0 (Mac) Safari", prod, "control", 0)
                for (t, _, _, prod, kind, _) in hv if kind == "bot"]
+    elif scenario == "notebook":                            # 2026-11-27 researcher scenario 2: no deliberate
+        hv = hydra_events(rng, t0, 6 * 3600)                # re-fetch; a second, equally cold swarm member
+        ev += hv                                            # opens the same product 0-2 h later and the
+        ev += [(t + rng.uniform(0, 2) * 3600, f"member2-{i}", "Mozilla/5.0 (Windows) Chrome", prod, "control", i)
+               for i, (t, _, _, prod, kind, _) in enumerate(hv) if kind == "bot"]   # notebook compares them
     elif scenario == "vantage":                             # researcher scenario 2
         hv = hydra_events(rng, t0, 6 * 3600)
         ev += hv
@@ -320,7 +327,7 @@ def run_intel(scenario, seed, fixed):
 
 
 SPIDER_SCENARIOS = ["shoppers", "hydra", "hydra_slow", "hydra_ramp", "hydra_padded", "hydra_padded10", "vantage",
-                    "vantage_warm"]
+                    "vantage_warm", "notebook"]
 INTEL_SCENARIOS = ["forged_witness", "cross_replay", "intel_flood", "echo_double", "pollution"]
 
 

@@ -44,12 +44,15 @@ def _carrier(s, t=0.0, households=60, uas=60):
     return t
 
 
+CROWD = {"SPIDER_CROWD_ALERT": "on"}       # opt-in since analyst A2/A5 (2026-11-27)
+
+
 def test_attacker_on_a_carrier_address_is_sealed_alone():
-    s = Spider(Policy({"SPIDER_METRONOME_CV": "0"}))
+    s = Spider(Policy({"SPIDER_METRONOME_CV": "0", **CROWD}))
     t = _carrier(s)
     for i in range(160):                                   # one copier behind the same carrier address, alone over BREADTH
         t += 41 + i % 9
-        s.observe("100.64.0.1", "python-requests/2.32", 3000 - i, t)
+        s.observe("100.64.0.1", "python-requests/2.32", 1 + (i * 613) % 2900, t)
     seals = sorted(x for f in s.inspect(now=t) for x in f.get("seal", []))
     assert seals == ["100.64.0.1|python-requests/2.32"]                 # the crowd itself is flagged, not sealed
 
@@ -77,25 +80,36 @@ def test_spider_seal_expires_and_can_be_raised_again(monkeypatch):
 
 
 def test_crowd_address_without_a_copier_is_not_sealed():
-    s = Spider(Policy({"SPIDER_METRONOME_CV": "0"}))
+    s = Spider(Policy({"SPIDER_METRONOME_CV": "0", **CROWD}))
     t = _carrier(s, households=80)
     assert all(not f.get("seal") for f in s.inspect(now=t))
 
 
-def test_cgnat_households_are_spared_and_the_copier_capped():
+def test_cgnat_households_are_spared_and_the_copier_capped(monkeypatch):
     from simulations.nightly import n20261127 as night
-    before, after = night.run("cgnat", 0, fixed=False), night.run("cgnat", 0, fixed=True)
+    before = night.run("cgnat", 0, fixed=False)
     assert before["household_fp_rate"] > 0.5                     # release: the whole carrier sees fakes
+    monkeypatch.setattr(night, "EXTRA_ENV", dict(CROWD))           # crowd mode, opt-in
+    after = night.run("cgnat", 0, fixed=True)
     assert after["household_fp_rate"] < 0.1 and after["bot_products_stolen"] <= 160
     assert night.run("cgnat_quiet", 0, fixed=True)["household_fp_rate"] == 0
     assert night.run("second_opinion", 0, fixed=True)["detected_offline"] == 0
 
 
+def test_metronome_seals_even_a_crowd():
+    s = Spider(Policy({"SPIDER_BREADTH": "100000", **CROWD}))
+    for i in range(60):
+        s.observe("10.7.7.7", f"build-{i % 30}", 1 + (i * 397) % 2900, i * 10.0)    # clockwork, 30 browsers
+    seals = [x for f in s.inspect(now=600) if f["rule"] == "metronome" for x in f["seal"]]
+    assert seals == ["10.7.7.7"]
+
+
 def test_ua_rotator_cannot_hide_as_a_crowd():
+    """Analyst A2: by default the branch must be no worse than release against a UA rotator."""
     from simulations.nightly import n20261127 as night
     assert night.run("rotator400", 0, fixed=False)["bot_products_stolen"] <= 160   # release: sealed at BREADTH
     r = night.run("rotator400", 0, fixed=True)
-    assert r["address_sealed"] and r["bot_products_stolen"] <= 620                # bounded by CROWD_BREADTH
+    assert r["address_sealed"] and r["bot_products_stolen"] <= 160
 
 
 def test_seal_does_not_change_pitcher_timing():
@@ -145,3 +159,47 @@ def test_friction_guard_model_shows_no_fakes_but_does_not_stop_theft():
         evening.EXTRA_ENV.pop("SPIDER_GUARD_ACTION")
     assert r["fakes_exposed_by_control"] == 0 and r["shopper_fp_rate"] == 0
     assert r["bot_challenges_solved"] > 0 and r["stolen_share"] == 1.0
+
+
+# ---------------- the real shop: Spider seals expire, fakes stay consistent, no 404 tell ----------------
+
+def test_spider_seal_expires_in_the_real_shop_and_fakes_stay_consistent(monkeypatch):
+    """Analyst A1 and A7: the client record used to stay sealed forever; after expiry the same visitor must
+    not see the real page of a product it was shown fake."""
+    import http.client
+    import threading
+    import time
+    monkeypatch.setattr(shop, "SPIDER_MODE", "seal")
+    monkeypatch.setattr(shop, "SPIDER_SEALED", {})
+    monkeypatch.setitem(shop.STATE, "lockdown_at", None)
+    monkeypatch.setattr(shop, "TRIGGERS", [])
+    sp = Spider(Policy({"SPIDER_SEAL_TTL": "1"}))
+    monkeypatch.setattr(shop, "SPIDER", sp)
+    srv = shop.ShopServer(("127.0.0.1", 0), shop.Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+
+    def get(path, ua="Mozilla/5.0 (household-77)"):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("GET", path, headers={"User-Agent": ua})
+        r = conn.getresponse()
+        body = r.read().decode()
+        conn.close()
+        return r.status, body
+    try:
+        shop.SPIDER_SEALED["127.0.0.1"] = time.time() + 1.0
+        assert get("/shop/item/1501")[1] != shop.item_page(1501)          # sealed: fake
+        time.sleep(1.2)
+        assert get("/shop/item/1502")[1] == shop.item_page(1502)          # seal ran out: real again
+        assert get("/shop/item/1501")[1] != shop.item_page(1501)          # ... but 1501 stays as it was seen
+        shop.SPIDER_SEALED["127.0.0.1"] = time.time() + 5.0
+        assert get("/nope/xyz")[0] == 404                                  # sealed: same 404 as anyone
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_short_shadow_secret_is_refused():
+    import pytest
+    with pytest.raises(SystemExit):
+        shop._load_shadow_secret({"DARWIN_SHADOW_SECRET": "1"})
