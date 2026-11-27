@@ -93,6 +93,7 @@ Run:  python -m darwin.judith.shop
 """
 import collections
 import hashlib
+import hmac
 import json
 import os
 import random
@@ -202,8 +203,39 @@ ADJ = ["Classic", "Pro", "Ultra", "Compact", "Heavy-Duty", "Eco", "Deluxe", "Min
 NOUN = ["Widget", "Sprocket", "Gizmo", "Bracket", "Valve", "Coupler", "Flange", "Gear", "Hinge", "Spindle"]
 
 
+def _load_shadow_secret(environ=os.environ):
+    """The secret that makes the shadow site's fakes unpredictable. Without it, anyone with the public
+    code could recompute the fake page for every product and tell a sealed visit from a real one
+    (Nov 25 finding 20261125-2). DARWIN_SHADOW_SECRET sets it; otherwise one is made once and kept in
+    results/shadow_secret, so the fakes stay the same across restarts (a sealed visitor that comes back
+    after a restart must not see a different fake)."""
+    value = environ.get("DARWIN_SHADOW_SECRET")
+    if value:
+        return value.encode()
+    path = results_path("shadow_secret")
+    try:
+        with open(path, "rb") as f:
+            secret = f.read().strip()
+        if len(secret) >= 16:
+            return secret
+    except OSError:
+        pass
+    secret = os.urandom(32).hex().encode()
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(secret)
+    return secret
+
+
+SHADOW_SECRET = _load_shadow_secret()
+
+
 def item_page(n, fake=False):
-    r = random.Random(("FAKE" if fake else "REAL") + str(n))
+    if fake:
+        seed = hmac.new(SHADOW_SECRET, f"FAKE{n}".encode(), hashlib.sha256).hexdigest()
+    else:
+        seed = "REAL" + str(n)                      # stands in for the real catalog database
+    r = random.Random(seed)
     name = f"{r.choice(ADJ)} {r.choice(NOUN)} {r.randint(100, 999)}"
     price = f"{r.uniform(4, 400):.2f}"
     sku = "".join(r.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(8))
