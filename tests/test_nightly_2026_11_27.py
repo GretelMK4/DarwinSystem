@@ -132,3 +132,16 @@ def test_compromised_plant_cannot_get_real_customer_keys_sealed():
     assert night.run("token_frame", 0, fixed=False)["real_customer_keys_accepted"] == 500
     r = night.run("token_frame", 0, fixed=True)
     assert r["real_customer_keys_accepted"] == 0 and r["honest_fake_keys_accepted"] == 100
+
+
+def test_friction_guard_model_shows_no_fakes_but_does_not_stop_theft():
+    """Lab 2026-11-27: the fleet guard with friction instead of fakes (harness model only). It removes every
+    fake (nothing for a control to compare) but a swarm that pays the proof-of-work copies everything."""
+    from simulations.nightly import evening
+    evening.EXTRA_ENV["SPIDER_GUARD_ACTION"] = "friction"
+    try:
+        r = evening.run("vantage", 0, fixed=True)
+    finally:
+        evening.EXTRA_ENV.pop("SPIDER_GUARD_ACTION")
+    assert r["fakes_exposed_by_control"] == 0 and r["shopper_fp_rate"] == 0
+    assert r["bot_challenges_solved"] > 0 and r["stolen_share"] == 1.0

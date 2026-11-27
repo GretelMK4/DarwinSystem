@@ -142,6 +142,8 @@ def run_spider(scenario, seed, fixed, days=4, inspect_every=600.0):
     shopper_fake, shoppers_hit, shopper_views = 0, set(), 0
     bot_requests, first_flag = 0, None
     got_fake, ctrl_fake = set(), {}
+    friction = EXTRA_ENV.get("SPIDER_GUARD_ACTION") == "friction"
+    solved, shoppers_challenged, bot_challenges = set(), set(), 0
     for t, addr, ua, product, kind, who in ev:
         while t >= next_inspect:
             for f in sp.inspect(now=next_inspect):
@@ -150,7 +152,18 @@ def run_spider(scenario, seed, fixed, days=4, inspect_every=600.0):
                 elif f["rule"] != "component_changed":
                     sealed.add(f["subject"])
             next_inspect += inspect_every
-        guarded = fixed and sp.guarded(addr, product, now=t)
+        if friction:
+            # guard action "friction" (2026-11-27): while the guard is up, a cold address must solve a
+            # proof-of-work once before ANY product page, then gets real pages; nobody is shown fakes
+            guarded = False
+            if fixed and t < sp.guard_until and sp._cold(addr, t) and addr not in solved:
+                solved.add(addr)
+                if kind == "shopper":
+                    shoppers_challenged.add(who)
+                elif kind in ("bot", "pad", "control"):
+                    bot_challenges += 1
+        else:
+            guarded = fixed and sp.guarded(addr, product, now=t)
         sp.observe(addr, ua, product, t, shadowed=guarded)
         shadow = addr in sealed or guarded
         if guarded:
@@ -189,7 +202,11 @@ def run_spider(scenario, seed, fixed, days=4, inspect_every=600.0):
             "shopper_fake_pages": shopper_fake, "shopper_views": shopper_views,
             "fakes_exposed_by_control": exposed,
             "fleet_trips": sum(1 for s in sp.slots if s[2]),
-            "baseline_end": round(sp.baseline or 0, 1)}
+            "baseline_end": round(sp.baseline or 0, 1),
+            "guard_action": "friction" if friction else "fakes",
+            "shoppers_challenged": len(shoppers_challenged),
+            "shopper_challenge_rate": round(len(shoppers_challenged) / n_shoppers, 5),
+            "bot_challenges_solved": bot_challenges}
 
 
 # ---------------- intel group ----------------
