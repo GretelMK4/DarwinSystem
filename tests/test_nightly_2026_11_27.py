@@ -98,3 +98,10 @@ def test_ua_rotator_cannot_hide_as_a_crowd():
     assert night.run("rotator400", 0, fixed=False)["bot_products_stolen"] <= 160   # release: sealed at BREADTH
     r = night.run("rotator400", 0, fixed=True)
     assert r["address_sealed"] and r["bot_products_stolen"] <= 620                # bounded by CROWD_BREADTH
+
+
+def test_seal_does_not_change_pitcher_timing():
+    """Researcher scenario 1 (latency tell), on the real shop server on localhost."""
+    from simulations.nightly import n20261127 as night
+    r = night.run_latency(7, fixed=True, samples=6)
+    assert r["agents"] >= 1 and r["seal_visible"] == 0

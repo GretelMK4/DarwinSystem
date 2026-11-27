@@ -10,6 +10,8 @@ shop's spider_flag / spider_sealed decision) with simulated visitors.
                   build, plus one patient copier on the same address (20261125-3, -8)
   cgnat_quiet     the households only (false positives)
   rotator25/400   one dedicated address copies the whole catalog, rotating 25 or 400 User-Agents
+  latency_tell    researcher scenario 1: time a pitcher page before and after the sealing request
+                  (runs Judith's real shop on a localhost port of this process)
   cgnat_framing   the same, but the copier uses the most common household browser string, so
                   its identity overlaps real people (20261125-4)
 
@@ -119,11 +121,64 @@ def run_cgnat(scenario, seed, fixed, days=3, inspect_every=300.0):
             "address_sealed": addr in sealed}
 
 
+def run_latency(seed, fixed, samples=12):
+    """Researcher scenario 1 (latency tell), against Judith's real shop server on a localhost port of this
+    process. One agent times the same pitcher listing and a product page before and after the request that
+    seals it, and calls the seal visible when the median moves by more than 3 times the spread it measured
+    first (or by half)."""
+    import http.client
+    import statistics
+    import threading
+    import time
+    old_even, shop.DRIP_EVEN = shop.DRIP_EVEN, fixed
+    srv = shop.ShopServer(("127.0.0.1", 0), shop.Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+
+    def get(path, ua):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+        t = time.perf_counter()
+        conn.request("GET", path, headers={"User-Agent": ua})
+        conn.getresponse().read()
+        conn.close()
+        return time.perf_counter() - t
+
+    out = {"scenario": "latency_tell", "seed": seed, "fixed": fixed, "agents": 0, "seal_visible": 0,
+           "product_tell": 0, "ratios": []}
+    try:
+        for a in range(4):
+            ua = f"agent-{seed}-{a}-{fixed}"
+            get("/backup/", ua)
+            c = shop.CLIENTS.get(f"127.0.0.1|{ua}")
+            if c is None or c["role"] == "scout":
+                continue                                   # scouts are released with gold, not sealed
+            out["agents"] += 1
+            pre = [get("/backup/", ua) for _ in range(samples)]
+            prod_pre = [get("/shop/item/%d" % (100 + k), ua) for k in range(samples)]
+            get("/backup/db/users_2024.sql", ua)           # depth 2: this request seals
+            post = [get("/backup/", ua) for _ in range(samples)]
+            prod_post = [get("/shop/item/%d" % (200 + k), ua) for k in range(samples)]
+            spread = (statistics.quantiles(pre, n=4)[2] - statistics.quantiles(pre, n=4)[0]) or 1e-4
+            shift = statistics.median(post) - statistics.median(pre)
+            ratio = statistics.median(post) / statistics.median(pre)
+            out["ratios"].append(round(ratio, 2))
+            out["seal_visible"] += abs(shift) > 3 * spread or abs(ratio - 1) > 0.5
+            pr = statistics.median(prod_post) / statistics.median(prod_pre)
+            out["product_tell"] += abs(pr - 1) > 0.5
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        shop.DRIP_EVEN = old_even
+    return out
+
+
 EXTRA_ENV = {}
-SCENARIOS = ["second_opinion", "cgnat", "cgnat_framing", "cgnat_quiet", "rotator25", "rotator400"]
+SCENARIOS = ["second_opinion", "cgnat", "cgnat_framing", "cgnat_quiet", "rotator25", "rotator400", "latency_tell"]
 
 
 def run(scenario, seed, fixed):
+    if scenario == "latency_tell":
+        return run_latency(seed, fixed)
     if scenario == "second_opinion":
         return run_second_opinion(seed, fixed)
     if scenario.startswith(("cgnat", "rotator")):

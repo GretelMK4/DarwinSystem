@@ -117,6 +117,10 @@ CATALOG = int(os.environ.get("CATALOG", "3000"))
 PER_PAGE = 10
 PAGES = (CATALOG + PER_PAGE - 1) // PER_PAGE
 DRIP = float(os.environ.get("DRIP", "0.01"))
+# Sealing must not change timing. The drip used to triple at the moment of the seal, so a visitor that timed
+# the same pitcher page before and after could see exactly which request sealed it (lab 2026-11-27, latency
+# tell). With DRIP_EVEN=on (default) the slow drip starts at a visitor's first pitcher request and stays.
+DRIP_EVEN = os.environ.get("DRIP_EVEN", "on") == "on"
 SEAL_DEPTH, GOLD_DEPTH, SCOUT_EVERY, RELEASE_AFTER = 2, 3, 4, 8.0
 ALARM_K = int(os.environ.get("ALARM_K", "3"))
 ALARM_WINDOW = float(os.environ.get("ALARM_WINDOW", "6"))
@@ -482,6 +486,7 @@ class Handler(QuietHandler):
                     event("BLOCKED_429", client, "over rate limit")
                 blocked = c["blocked"]
             if pit:
+                c["touched"] = True
                 trig = False
                 if LOCKDOWN_MODE and locked:
                     trig = True                                       # hair trigger
@@ -568,7 +573,7 @@ class Handler(QuietHandler):
             st, ct, body, kind = 200, "application/json", ts.gold_file(path), "gold"
         elif pit:
             kind = "pitcher"
-            drip = DRIP * (3 if sealed else 1 + depth / 2)
+            drip = DRIP * (3 if sealed or (DRIP_EVEN and c.get("touched")) else 1 + depth / 2)
             if path == "/.env":
                 st, ct, body = 200, "text/plain", ts.dotenv()
             elif pit == "api":
