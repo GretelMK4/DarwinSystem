@@ -61,6 +61,7 @@ def run_cgnat(scenario, seed, fixed, days=3, inspect_every=300.0):
     if not fixed:
         pol.seal_ttl = float("inf")
         pol.crowd_alert = False
+        pol.crowd_nets = []
         pol.shared_uas = 10 ** 9                       # release: every flag seals the address, forever
     sp = Spider(pol)
     sealed = {}                                        # subject -> until (same rule as shop.spider_sealed)
@@ -76,8 +77,11 @@ def run_cgnat(scenario, seed, fixed, days=3, inspect_every=300.0):
     bot_ua = "Mozilla/5.0 (Android 15) Chrome/131.0.1" if scenario == "cgnat_framing" else "Mozilla/5.0 (X11) Chrome/130"
     t = DAY + 9 * 3600
     if scenario.startswith("rotator"):
-        # a dedicated address (no households) whose copier rotates User-Agents to look like a crowd
+        # a dedicated address (no households) whose copier rotates User-Agents to look like a crowd;
+        # rotator_cgnat runs from a mobile carrier's CGNAT address (a mobile proxy)
         ev = []
+        if scenario != "rotator_cgnat":
+            addr = "203.0.113.50"
         n_ua = 25 if scenario == "rotator25" else 400
         for i, prod in enumerate(rng.sample(range(1, 3001), 3000)):
             ev.append((t, f"Mozilla/5.0 build-{i % n_ua}", prod, "bot", "bot"))
@@ -136,16 +140,17 @@ def run_latency(seed, fixed, samples=12):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     port = srv.server_address[1]
 
-    def get(path, ua):
+    def get(path, ua, status=False):
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
         t = time.perf_counter()
         conn.request("GET", path, headers={"User-Agent": ua})
-        conn.getresponse().read()
+        r = conn.getresponse()
+        r.read()
         conn.close()
-        return time.perf_counter() - t
+        return (time.perf_counter() - t, r.status) if status else time.perf_counter() - t
 
     out = {"scenario": "latency_tell", "seed": seed, "fixed": fixed, "agents": 0, "seal_visible": 0,
-           "product_tell": 0, "ratios": []}
+           "product_tell": 0, "not_found_tell": 0, "ratios": []}
     try:
         for a in range(4):
             ua = f"agent-{seed}-{a}-{fixed}"
@@ -155,9 +160,12 @@ def run_latency(seed, fixed, samples=12):
                 continue                                   # scouts are released with gold, not sealed
             out["agents"] += 1
             pre = [get("/backup/", ua) for _ in range(samples)]
+            nf_pre = get("/nope/xyz", ua, status=True)
             prod_pre = [get("/shop/item/%d" % (100 + k), ua) for k in range(samples)]
             get("/backup/db/users_2024.sql", ua)           # depth 2: this request seals
             post = [get("/backup/", ua) for _ in range(samples)]
+            nf_post = get("/nope/xyz", ua, status=True)
+            out["not_found_tell"] += nf_pre[1] != nf_post[1] or nf_post[0] > 5 * nf_pre[0] + 0.005
             prod_post = [get("/shop/item/%d" % (200 + k), ua) for k in range(samples)]
             spread = (statistics.quantiles(pre, n=4)[2] - statistics.quantiles(pre, n=4)[0]) or 1e-4
             shift = statistics.median(post) - statistics.median(pre)
@@ -210,7 +218,7 @@ def run_token_frame(seed, fixed):
 
 
 EXTRA_ENV = {}
-SCENARIOS = ["second_opinion", "cgnat", "cgnat_framing", "cgnat_quiet", "rotator25", "rotator400", "latency_tell", "token_frame"]
+SCENARIOS = ["second_opinion", "cgnat", "cgnat_framing", "cgnat_quiet", "rotator25", "rotator400", "rotator_cgnat", "latency_tell", "token_frame"]
 
 
 def run(scenario, seed, fixed):

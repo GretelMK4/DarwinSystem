@@ -73,6 +73,7 @@ Limits, stated plainly
 """
 import collections
 import hashlib
+import ipaddress
 import json
 import os
 import statistics
@@ -121,7 +122,9 @@ class Policy:
                                                            # flagged and sealed (0 = same as BREADTH)
         self.crowd_breadth = get("CROWD_BREADTH", 600, int)    # a crowd address is sealed after all
                                                            # past this many different products per window
-        self.crowd_alert = environ.get("SPIDER_CROWD_ALERT", "off") == "on"   # off by default (analyst A2/A5:
+        self.crowd_alert = environ.get("SPIDER_CROWD_ALERT", "off") == "on"   # crowd mode for every address
+        self.crowd_nets = [ipaddress.ip_network(n.strip(), strict=False) for n in   # ... or only for these
+                           environ.get("SPIDER_CROWD_NETS", "100.64.0.0/10").split(",") if n.strip()]   # off by default (analyst A2/A5:
                                                            # UA count cannot tell a crowd from a rotator)   # a crowd address (more than
                                                            # MAX_IDENTITIES browsers) is flagged, not sealed
         self.fleet_sticky = get("FLEET_STICKY", 0)         # a product shadowed by the guard stays shadowed
@@ -335,7 +338,7 @@ class Spider:
                 flag["seal"] = [subject]               # machine signatures seal the address, crowd or not (A2)
             elif rule == "breadth":
                 flag["seal"] = [subject] if "|" in subject else self._seal_subjects(subject)
-            elif rule == "many_identities" and p.crowd_alert:
+            elif rule == "many_identities" and self.crowd_address(subject):
                 flag["seal"] = []                      # a crowd (CGNAT) shows many browsers: flag for people only
             self.flags.append(flag)
             new.append(flag)
@@ -345,6 +348,19 @@ class Spider:
             if self.on_flag:
                 self.on_flag(flag)
         return new
+
+    def crowd_address(self, address):
+        """May this address be a crowd (many people behind one address)? Decided from evidence about the
+        address, not from its User-Agent count (analyst A5): the shared address space carriers use for
+        CGNAT (100.64.0.0/10) by default, plus whatever the owner lists in SPIDER_CROWD_NETS (carrier
+        ranges, the office network), or every address with SPIDER_CROWD_ALERT=on."""
+        if self.policy.crowd_alert:
+            return True
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            return False
+        return any(ip in net for net in self.policy.crowd_nets)
 
     def _seal_subjects(self, address):
         """Who a per-address flag should seal. Usually the address. On a shared address (many
@@ -363,7 +379,7 @@ class Spider:
         # looks like (Nov 25 warning 20261125-7): seal the address as before, for SEAL_TTL. A crowd (more
         # than MAX_IDENTITIES browsers, as behind a carrier's CGNAT) is flagged for people only when
         # SPIDER_CROWD_ALERT is on, because sealing it shows fakes to every household behind it.
-        if p.crowd_alert and len(uas) > p.max_identities:
+        if self.crowd_address(address) and len(uas) > p.max_identities:
             return []                      # bounded by the crowd_breadth rule instead
         return [address]
 

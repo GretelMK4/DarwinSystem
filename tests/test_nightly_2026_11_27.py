@@ -203,3 +203,14 @@ def test_short_shadow_secret_is_refused():
     import pytest
     with pytest.raises(SystemExit):
         shop._load_shadow_secret({"DARWIN_SHADOW_SECRET": "1"})
+
+
+def test_crowd_mode_only_where_the_address_is_known_to_be_shared():
+    """Analyst A5: crowd status from evidence about the address (CGNAT space by default), not UA count."""
+    from simulations.nightly import n20261127 as night
+    assert night.run("cgnat_quiet", 1, fixed=True)["household_fp_rate"] == 0          # 100.64.0.0/10
+    assert night.run("rotator25", 1, fixed=True)["bot_products_stolen"] <= 160         # public address
+    assert night.run("rotator_cgnat", 1, fixed=True)["bot_products_stolen"] <= 620     # known residual
+    sp = Spider(Policy({}))
+    assert sp.crowd_address("100.64.7.7") and not sp.crowd_address("203.0.113.5")
+    assert not sp.crowd_address("not-an-ip")
