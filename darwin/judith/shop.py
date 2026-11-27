@@ -291,11 +291,34 @@ def listing(page, honeylinks=None):
     head = ""
     if honeylinks:
         # one hidden product per page; a stylesheet hides it, so people never see it
-        pos = random.Random(f"honey{page}").randrange(len(lis) + 1)
-        lis.insert(pos, f'<li class="x9"><a href="/shop/item/{CATALOG + page}">Item {CATALOG + page}</a></li>')
+        r = random.Random(hmac.new(SHADOW_SECRET, f"honeypos{page}".encode(), hashlib.sha256).hexdigest())
+        pos, hid = r.randrange(len(lis) + 1), honey_item(page)
+        lis.insert(pos, f'<li class="x9"><a href="/shop/item/{hid}">Item {hid}</a></li>')
         head = '<head><link rel="stylesheet" href="/static/site.css"></head>'
     nav = " ".join(f'<a href="/shop/?page={p}">{p}</a>' for p in range(1, PAGES + 1))
     return f"<html>{head}<body><h1>Catalog page {page}</h1><ul>{''.join(lis)}</ul><nav>{nav}</nav></body></html>"
+
+
+def _honey_table():
+    """Hidden-link product numbers, one per listing page, drawn with the shadow secret from a range ten times
+    the catalog (Nov 25 finding 20261125-11: they used to be CATALOG + page, so anyone with the code knew
+    them). Still above the real numbers: a site whose real product numbers are sparse hides them better."""
+    by_page, used = {}, set()
+    for page in range(1, PAGES + 1):
+        h = int(hmac.new(SHADOW_SECRET, f"honey{page}".encode(), hashlib.sha256).hexdigest(), 16)
+        n = CATALOG + 1 + h % (CATALOG * 9)
+        while n in used:
+            n = CATALOG + 1 + (n - CATALOG) % (CATALOG * 9)
+        used.add(n)
+        by_page[page] = n
+    return by_page, {n: p for p, n in by_page.items()}
+
+
+HONEY_BY_PAGE, HONEY_PAGE_OF = _honey_table()
+
+
+def honey_item(page):
+    return HONEY_BY_PAGE[page]
 
 
 def honey_id(path):
@@ -305,7 +328,7 @@ def honey_id(path):
         n = int(path.rsplit("/", 1)[-1])
     except ValueError:
         return None
-    return n if CATALOG < n <= CATALOG + PAGES else None
+    return n if n in HONEY_PAGE_OF else None
 
 
 def pitcher_of(path):

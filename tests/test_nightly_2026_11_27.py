@@ -241,3 +241,11 @@ def test_ipv4_mapped_carrier_address_is_a_crowd():
 def test_cgnat_on_a_public_carrier_address_is_still_protected_from_many_identities():
     from simulations.nightly import n20261127 as night
     assert night.run("cgnat_public_quiet", 0, fixed=True)["household_fp_rate"] == 0
+
+
+def test_honeylink_numbers_are_not_computable_from_the_code():
+    """Nov 25 finding 20261125-11: hidden-link products used to be CATALOG + page."""
+    ids = [shop.honey_item(p) for p in range(1, shop.PAGES + 1)]
+    assert len(set(ids)) == shop.PAGES and all(n > shop.CATALOG for n in ids)
+    assert sum(n == shop.CATALOG + p for p, n in enumerate(ids, 1)) <= 1
+    assert shop.honey_id(f"/shop/item/{ids[0]}") == ids[0] if shop.HONEYLINKS else True

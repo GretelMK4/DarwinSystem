@@ -101,11 +101,12 @@ def test_shopper_gets_the_real_site(shop_url):
     assert get(f"{shop_url}/", ua)[0] == 200
     for n in (1, 42, shop.CATALOG):
         assert get(f"{shop_url}/shop/item/{n}", ua) == (200, shop.item_page(n))
-    assert get(f"{shop_url}/shop/item/{shop.CATALOG + shop.PAGES + 1}", ua)[0] == 404
+    not_honey = next(n for n in range(shop.CATALOG + 1, shop.CATALOG * 10) if n not in shop.HONEY_PAGE_OF)
+    assert get(f"{shop_url}/shop/item/{not_honey}", ua)[0] == 404
 
 
 def test_hidden_link_seals_into_a_consistent_shadow(shop_url):
-    honey = f"/shop/item/{shop.CATALOG + 1}"
+    honey = f"/shop/item/{shop.honey_item(1)}"
     assert honey in get(f"{shop_url}/shop/?page=1", "bot-a")[1]
     pages = {}
     for ua in ("bot-a", "bot-b"):
@@ -129,7 +130,7 @@ def test_pitcher_file_seals_prey_but_not_scouts(shop_url):
 
 def test_verified_crawler_is_never_trapped(shop_url, monkeypatch):
     monkeypatch.setattr(shop, "CRAWLERS", fake_verifier(True))
-    honey = f"/shop/item/{shop.CATALOG + 1}"
+    honey = f"/shop/item/{shop.honey_item(1)}"
     assert "<!--" not in get(f"{shop_url}/", GOOGLE_UA)[1]                 # no bait comment
     assert honey not in get(f"{shop_url}/shop/?page=1", GOOGLE_UA)[1]      # no hidden link
     assert get(shop_url + honey, GOOGLE_UA)[0] == 404
@@ -144,7 +145,7 @@ def test_verified_crawler_is_never_trapped(shop_url, monkeypatch):
 def test_copied_crawler_user_agent_earns_nothing(shop_url, monkeypatch):
     monkeypatch.setattr(shop, "CRAWLERS", fake_verifier(False))
     ua = GOOGLE_UA + " spoof"
-    get(f"{shop_url}/shop/item/{shop.CATALOG + 2}", ua)                    # follows a hidden link
+    get(f"{shop_url}/shop/item/{shop.honey_item(2)}", ua)                    # follows a hidden link
     assert get(f"{shop_url}/shop/item/5", ua)[1] != shop.item_page(5)      # sealed like any other bot
 
 
