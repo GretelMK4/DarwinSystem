@@ -65,8 +65,10 @@ def _templates(brand, prefixes):
 
 
 class Hercules:
-    def __init__(self, n, diverse, seed=0, port_base=9500, per_site_keys=False, surge_n=30, surge_window=10):
+    def __init__(self, n, diverse, seed=0, port_base=9500, per_site_keys=False, surge_n=30, surge_window=10,
+                 token_key=None):
         self.diverse = diverse
+        self.token_key = token_key                # this plant's intel key: fake keys Judith can check
         self.per_site_keys = per_site_keys        # a site's API only accepts keys it issued itself
         self.site_keys = {}
         self.surge_n, self.surge_window = surge_n, surge_window
@@ -95,6 +97,10 @@ class Hercules:
     def _rng(self, site, path):
         return random.Random(int(hashlib.sha256((site["salt"] + path).encode()).hexdigest(), 16))
 
+    def _tok(self, r):
+        """A fake key body: checkable by Judith when this farm has an intel key (intel.mint_token)."""
+        return intel.mint_token(self.token_key, r) if self.token_key else ts.tok(r, 28)
+
     def _issue(self, token, where, site=None):
         ts.issue(token, where)
         with self.lock:
@@ -120,12 +126,12 @@ class Hercules:
     def file(self, site, path):
         r = self._rng(site, path)
         nxt = f"{path.rsplit('/', 1)[0]}/{ts.dir_name(r)}/"
-        return (f"api_key=sk_live_{self._issue(ts.tok(r, 28), site['name'] + path, site)}\n"
+        return (f"api_key=sk_live_{self._issue(self._tok(r), site['name'] + path, site)}\n"
                 f"DB_PASSWORD={ts.tok(r, 20)}\n# remaining exports: {nxt}\n")
 
     def dotenv(self, site):
         r = self._rng(site, "/.env")
-        return (f"APP_ENV=production\nSTRIPE_KEY=sk_live_{self._issue(ts.tok(r, 28), site['name'] + '/.env', site)}\n"
+        return (f"APP_ENV=production\nSTRIPE_KEY=sk_live_{self._issue(self._tok(r), site['name'] + '/.env', site)}\n"
                 f"DB_PASSWORD={ts.tok(r, 20)}\nAPI_BASE=/api/v1/\n"
                 + "".join(f"PATH_{i}={p}\n" for i, p in enumerate(site["prefixes"])))
 
@@ -140,7 +146,7 @@ class Hercules:
         r = self._rng(site, path + key)
         return 200, {"valid": True, "data": [{"id": ts.tok(r, 10), "balance": round(r.uniform(10, 9000), 2)}
                                              for _ in range(10)],
-                     "service_key": "sk_live_" + self._issue(ts.tok(r, 28), site["name"] + " api", site),
+                     "service_key": "sk_live_" + self._issue(self._tok(r), site["name"] + " api", site),
                      "next": "/api/v1/accounts?cursor=" + ts.tok(r, 8)}
 
     # ---- servers ----

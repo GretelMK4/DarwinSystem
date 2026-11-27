@@ -13,6 +13,8 @@ on this request -> shadow page, otherwise the real page):
   hydra_padded   each address first opens 3 popular products, then 3 tail ones
   hydra_padded10 the same with 10 popular products first (analyst F1)
   vantage_warm   vantage, but one long-lived control identity does all re-fetches (analyst F3)
+  notebook       (2026-11-27) a second cold swarm member opens each product 0-2 h after the first and the
+                 swarm's shared notes compare the two copies
   (hydra uses 1,000 addresses x 3 = the whole 3,000-product catalog; 2,000 x 3 asked for more
    products than exist, analyst artifact A1)
 Intel group (three Hercules, one compromised; Judith and Venus receive):
@@ -129,6 +131,11 @@ def run_spider(scenario, seed, fixed, days=4, inspect_every=600.0):
         ev += [(2 * DAY + 600 * k, "control-warm", "Mozilla/5.0 (Mac) Safari", 2 + k % 20, "warmup", 0) for k in range(10)]
         ev += [(t + rng.uniform(2, 12) * 3600, "control-warm", "Mozilla/5.0 (Mac) Safari", prod, "control", 0)
                for (t, _, _, prod, kind, _) in hv if kind == "bot"]
+    elif scenario == "notebook":                            # 2026-11-27 researcher scenario 2: no deliberate
+        hv = hydra_events(rng, t0, 6 * 3600)                # re-fetch; a second, equally cold swarm member
+        ev += hv                                            # opens the same product 0-2 h later and the
+        ev += [(t + rng.uniform(0, 2) * 3600, f"member2-{i}", "Mozilla/5.0 (Windows) Chrome", prod, "control", i)
+               for i, (t, _, _, prod, kind, _) in enumerate(hv) if kind == "bot"]   # notebook compares them
     elif scenario == "vantage":                             # researcher scenario 2
         hv = hydra_events(rng, t0, 6 * 3600)
         ev += hv
@@ -142,6 +149,8 @@ def run_spider(scenario, seed, fixed, days=4, inspect_every=600.0):
     shopper_fake, shoppers_hit, shopper_views = 0, set(), 0
     bot_requests, first_flag = 0, None
     got_fake, ctrl_fake = set(), {}
+    friction = EXTRA_ENV.get("SPIDER_GUARD_ACTION") == "friction"
+    solved, shoppers_challenged, bot_challenges = set(), set(), 0
     for t, addr, ua, product, kind, who in ev:
         while t >= next_inspect:
             for f in sp.inspect(now=next_inspect):
@@ -150,7 +159,18 @@ def run_spider(scenario, seed, fixed, days=4, inspect_every=600.0):
                 elif f["rule"] != "component_changed":
                     sealed.add(f["subject"])
             next_inspect += inspect_every
-        guarded = fixed and sp.guarded(addr, product, now=t)
+        if friction:
+            # guard action "friction" (2026-11-27): while the guard is up, a cold address must solve a
+            # proof-of-work once before ANY product page, then gets real pages; nobody is shown fakes
+            guarded = False
+            if fixed and t < sp.guard_until and sp._cold(addr, t) and addr not in solved:
+                solved.add(addr)
+                if kind == "shopper":
+                    shoppers_challenged.add(who)
+                elif kind in ("bot", "pad", "control"):
+                    bot_challenges += 1
+        else:
+            guarded = fixed and sp.guarded(addr, product, now=t)
         sp.observe(addr, ua, product, t, shadowed=guarded)
         shadow = addr in sealed or guarded
         if guarded:
@@ -189,7 +209,11 @@ def run_spider(scenario, seed, fixed, days=4, inspect_every=600.0):
             "shopper_fake_pages": shopper_fake, "shopper_views": shopper_views,
             "fakes_exposed_by_control": exposed,
             "fleet_trips": sum(1 for s in sp.slots if s[2]),
-            "baseline_end": round(sp.baseline or 0, 1)}
+            "baseline_end": round(sp.baseline or 0, 1),
+            "guard_action": "friction" if friction else "fakes",
+            "shoppers_challenged": len(shoppers_challenged),
+            "shopper_challenge_rate": round(len(shoppers_challenged) / n_shoppers, 5),
+            "bot_challenges_solved": bot_challenges}
 
 
 # ---------------- intel group ----------------
@@ -303,7 +327,7 @@ def run_intel(scenario, seed, fixed):
 
 
 SPIDER_SCENARIOS = ["shoppers", "hydra", "hydra_slow", "hydra_ramp", "hydra_padded", "hydra_padded10", "vantage",
-                    "vantage_warm"]
+                    "vantage_warm", "notebook"]
 INTEL_SCENARIOS = ["forged_witness", "cross_replay", "intel_flood", "echo_double", "pollution"]
 
 

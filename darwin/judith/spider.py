@@ -73,6 +73,7 @@ Limits, stated plainly
 """
 import collections
 import hashlib
+import ipaddress
 import json
 import os
 import statistics
@@ -112,6 +113,20 @@ class Policy:
         self.cusum_h = get("FLEET_CUSUM_H", 0.0)           # ... and trip level, in reference sd (0 = off;
                                                            # 8 caught a slow swarm in the lab, but with
                                                            # fakes as the guard action it cost shoppers)
+        self.seal_ttl = get("SEAL_TTL", 21600)             # how long Judith keeps a Spider seal; the same
+                                                           # flag may be raised again after this long
+        self.shared_uas = get("SHARED_UAS", 4, int)        # an address showing this many User-Agents is
+                                                           # treated as shared (office, mobile carrier)
+        self.shared_min = get("SHARED_MIN", 0, int)        # on a shared address, an identity (address|UA)
+                                                           # that alone opened more products than this is
+                                                           # flagged and sealed (0 = same as BREADTH)
+        self.crowd_breadth = get("CROWD_BREADTH", 600, int)    # a crowd address is sealed after all
+                                                           # past this many different products per window
+        self.crowd_alert = environ.get("SPIDER_CROWD_ALERT", "off") == "on"   # crowd mode for every address
+        self.crowd_nets = [ipaddress.ip_network(n.strip(), strict=False) for n in   # ... or only for these
+                           environ.get("SPIDER_CROWD_NETS", "100.64.0.0/10").split(",") if n.strip()]   # off by default (analyst A2/A5:
+                                                           # UA count cannot tell a crowd from a rotator)   # a crowd address (more than
+                                                           # MAX_IDENTITIES browsers) is flagged, not sealed
         self.fleet_sticky = get("FLEET_STICKY", 0)         # a product shadowed by the guard stays shadowed
                                                            # for cold visitors this long (0 = off)
 
@@ -122,7 +137,7 @@ class Spider:
         self.flag_log = flag_log               # path of a JSON-lines file for people, or None
         self.on_flag = on_flag                 # callback(flag) for the owner's chosen response
         self.flags = []
-        self._flagged = set()                  # (subject, rule) already raised
+        self._flagged = {}                     # (subject, rule) -> when it was last raised
         self._views = collections.defaultdict(collections.deque)    # address -> deque of (t, product)
         self._identities = collections.defaultdict(set)             # address -> User-Agents seen
         self._fingerprints = {}                # path -> sha256 at start-up
@@ -149,7 +164,7 @@ class Spider:
         with self._lock:
             if self.policy.fleet:
                 self._fleet_observe(address, product, t, shadowed)
-            self._views[address].append((t, product))
+            self._views[address].append((t, product, user_agent))
             ids = self._identities[address]
             if len(ids) <= self.policy.max_identities:
                 ids.add(user_agent)
@@ -268,10 +283,25 @@ class Spider:
             for address, views in self._views.items():
                 while views and now - views[0][0] > p.window:
                     views.popleft()
-                products = {n for _, n in views}
+                products = {v[1] for v in views}
                 if len(products) > p.breadth:
                     found.append((address, "breadth",
                                   f"{len(products)} different products viewed (approved: up to {p.breadth})"))
+                    if len(products) > p.crowd_breadth:
+                        # even a crowd is bounded: an address that rotates many User-Agents to pass as one
+                        # would otherwise copy the whole catalog (lab 2026-11-27, rotator25/400: 100% stolen)
+                        found.append((address, "crowd_breadth", f"{len(products)} different products from one "
+                                      f"address, even counting it as a crowd (approved: up to {p.crowd_breadth})"))
+                    uas = {v[2] for v in views}
+                    if len(uas) >= p.shared_uas:              # shared address: judge each browser on its own
+                        per = collections.defaultdict(set)
+                        for _, product, ua in views:
+                            per[ua].add(product)
+                        limit = p.shared_min or p.breadth
+                        for ua, prods in sorted(per.items()):
+                            if len(prods) > limit:
+                                found.append((f"{address}|{ua}", "breadth", f"{len(prods)} different products "
+                                              f"from one browser on a shared address (approved: up to {limit})"))
                 recent = list(views)[-p.run_n:]
                 if len(recent) >= p.run_n:
                     steps = [abs(b[1] - a[1]) == 1 for a, b in zip(recent, recent[1:])]
@@ -297,10 +327,21 @@ class Spider:
                 found.append((path, "component_changed", "file no longer matches its start-up fingerprint"))
         new = []
         for subject, rule, evidence in found:
-            if (subject, rule) in self._flagged and rule != "fleet_tail":
+            last = self._flagged.get((subject, rule))
+            if last is not None and rule != "fleet_tail" and now - last < p.seal_ttl:
                 continue
-            self._flagged.add((subject, rule))
+            self._flagged[(subject, rule)] = now
             flag = {"t": now, "subject": subject, "rule": rule, "evidence": evidence}
+            if rule == "crowd_breadth":
+                flag["seal"] = [subject]
+            elif rule in ("enumeration", "metronome"):
+                flag["seal"] = [subject]               # machine signatures seal the address, crowd or not (A2)
+            elif rule == "breadth":
+                flag["seal"] = [subject] if "|" in subject else self._seal_subjects(subject)
+            elif rule == "many_identities":
+                flag["seal"] = []                      # many browsers on one address is what a crowd looks like
+                                                       # too: flag for people only (review B1). A UA rotator
+                                                       # still trips breadth, which seals a non-crowd address.
             self.flags.append(flag)
             new.append(flag)
             if self.flag_log:
@@ -309,6 +350,43 @@ class Spider:
             if self.on_flag:
                 self.on_flag(flag)
         return new
+
+    def crowd_address(self, address):
+        """May this address be a crowd (many people behind one address)? Decided from evidence about the
+        address, not from its User-Agent count (analyst A5): whatever the owner lists in SPIDER_CROWD_NETS
+        (default 100.64.0.0/10, the CGNAT space, which a public server only sees behind a proxy or on a
+        carrier's own network: on the open internet carriers' public ranges must be listed, review B2), or
+        every address with SPIDER_CROWD_ALERT=on."""
+        if self.policy.crowd_alert:
+            return True
+        try:
+            ip = ipaddress.ip_address(address.split("%", 1)[0])
+        except ValueError:
+            return False
+        if ip.version == 6 and ip.ipv4_mapped:     # dual-stack listeners report ::ffff:a.b.c.d (review B3)
+            ip = ip.ipv4_mapped
+        return any(ip in net for net in self.policy.crowd_nets)
+
+    def _seal_subjects(self, address):
+        """Who a per-address flag should seal. Usually the address. On a shared address (many
+        User-Agents: an office, a mobile carrier's CGNAT) sealing the address shows fakes to every
+        person behind it, and lets an attacker frame it (Nov 25 findings 20261125-3/-4). There only the
+        identities (address|UA) that alone pass the limit are sealed (the identity breadth rule in
+        inspect). Every Spider seal lasts SEAL_TTL."""
+        p = self.policy
+        with self._lock:
+            views = list(self._views.get(address, ()))
+        uas = {v[2] for v in views}
+        if len(uas) < p.shared_uas:
+            return [address]
+        # The identity breadth rule in inspect seals a browser that alone did a copier's work. Here nobody
+        # stands out. A small group of browsers sharing the work evenly is what a UA-rotating copier
+        # looks like (Nov 25 warning 20261125-7): seal the address as before, for SEAL_TTL. A crowd (more
+        # than MAX_IDENTITIES browsers, as behind a carrier's CGNAT) is flagged for people only when
+        # SPIDER_CROWD_ALERT is on, because sealing it shows fakes to every household behind it.
+        if self.crowd_address(address) and len(uas) > p.max_identities:
+            return []                      # bounded by the crowd_breadth rule instead
+        return [address]
 
     # ---------- running ----------
 
